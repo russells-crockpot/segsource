@@ -23,7 +23,7 @@ mod mmap;
 #[cfg(feature = "memmap")]
 pub use mmap::MappedFileSource;
 
-pub trait Source: Sized {
+pub trait Source: Sized + Sync + Send {
     fn from_file_with_offset<P: AsRef<Path>>(
         path: P,
         initial_offset: u64,

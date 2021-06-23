@@ -557,10 +557,10 @@ impl<'r> io::Seek for Segment<'r> {
         match pos {
             io::SeekFrom::Start(to) => self.move_to(to)?,
             io::SeekFrom::Current(by) => {
-                self.move_to((self.current_offset() as i64 + by) as u64)?
+                self.move_to((self.current_offset() as i128 + by as i128) as u64)?
             }
             io::SeekFrom::End(point) => {
-                self.move_to((self.upper_offset_limit() as i64 - point) as u64)?
+                self.move_to((self.upper_offset_limit() as i128 - point as i128) as u64)?
             }
         };
         Ok(self.current_offset() as u64)

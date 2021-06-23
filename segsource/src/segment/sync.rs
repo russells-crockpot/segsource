@@ -3,8 +3,16 @@ use crate::{
     error::{Error, Result},
     Endidness,
 };
-use std::borrow::Borrow;
-use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::{
+    borrow::Borrow,
+    io,
+    pin::Pin,
+    task::{Context, Poll},
+};
+use tokio::{
+    io::{AsyncBufRead, AsyncRead, AsyncSeek, ReadBuf},
+    sync::{RwLock, RwLockReadGuard, RwLockWriteGuard},
+};
 
 use segsource_macros::make_number_methods;
 
@@ -537,6 +545,31 @@ impl<'r> AsyncSegment<'r> {
             self.endidness().await,
         ))
     }
+
+    pub fn next_n_sync(&mut self, max_bytes: usize) -> &[u8] {
+        let lock = self.position.get_mut();
+        let current_offset = self.initial_offset + *lock as u64;
+        let remaining = (self.initial_offset + self.data.len() as u64) - current_offset;
+        let num_bytes = if remaining > max_bytes as u64 {
+            max_bytes
+        } else {
+            remaining as usize
+        };
+        let data = &self.data[*lock..*lock + num_bytes];
+        *lock += num_bytes;
+        data
+    }
+
+    pub fn get_n_sync(&self, idx: usize, max_bytes: usize) -> &[u8] {
+        let current_offset = self.initial_offset + idx as u64;
+        let remaining = (self.initial_offset + self.data.len() as u64) - current_offset;
+        let num_bytes = if remaining > max_bytes as u64 {
+            max_bytes
+        } else {
+            remaining as usize
+        };
+        &self.data[idx..idx + num_bytes]
+    }
 }
 
 impl<'r> AsRef<[u8]> for AsyncSegment<'r> {
@@ -563,5 +596,51 @@ impl<'r> From<Segment<'r>> for AsyncSegment<'r> {
             data: other.data,
             endidness: RwLock::new(other.endidness),
         }
+    }
+}
+
+impl<'r> AsyncRead for AsyncSegment<'r> {
+    fn poll_read(self: Pin<&mut Self>, _: &mut Context, buf: &mut ReadBuf) -> Poll<io::Result<()>> {
+        let max_cap = buf.capacity() - buf.filled().len();
+        buf.put_slice(self.get_mut().next_n_sync(max_cap));
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl<'r> AsyncSeek for AsyncSegment<'r> {
+    fn start_seek(self: Pin<&mut Self>, pos: io::SeekFrom) -> io::Result<()> {
+        let me = self.get_mut();
+        let lock = me.position.get_mut();
+        match pos {
+            io::SeekFrom::Start(to) => {
+                *lock = ((me.initial_offset + me.data.len() as u64) + to) as usize
+            }
+            io::SeekFrom::Current(by) => {
+                *lock = ((me.initial_offset + *lock as u64) as i128 + by as i128) as usize
+            }
+            io::SeekFrom::End(adj) => {
+                *lock = ((me.initial_offset + me.data.len() as u64) as i128 + adj as i128) as usize
+            }
+        };
+        Ok(())
+    }
+    fn poll_complete(self: Pin<&mut Self>, _: &mut Context) -> Poll<io::Result<u64>> {
+        let me = self.get_mut();
+        let lock = me.position.get_mut();
+        Poll::Ready(Ok(me.initial_offset + *lock as u64))
+    }
+}
+
+impl<'r> AsyncBufRead for AsyncSegment<'r> {
+    fn poll_fill_buf(self: Pin<&mut Self>, _: &mut Context) -> Poll<io::Result<&[u8]>> {
+        let me = self.get_mut();
+        let idx = *me.position.get_mut();
+        Poll::Ready(Ok(me.get_n_sync(idx, 4096)))
+    }
+
+    fn consume(self: Pin<&mut Self>, amount: usize) {
+        let me = self.get_mut();
+        let lock = me.position.get_mut();
+        *lock += amount;
     }
 }
