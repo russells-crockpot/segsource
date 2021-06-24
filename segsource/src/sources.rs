@@ -1,5 +1,3 @@
-#[cfg(feature = "async")]
-use crate::segment::AsyncSegment;
 use crate::{
     error::{Error, Result},
     segment::Segment,
@@ -24,29 +22,15 @@ mod mmap;
 pub use mmap::MappedFileSource;
 
 pub trait Source: Sized + Sync + Send {
-    fn from_file_with_offset<P: AsRef<Path>>(
-        path: P,
-        initial_offset: u64,
-        endidness: Endidness,
-    ) -> Result<Self>;
+    type Item;
 
-    fn from_file<P: AsRef<Path>>(path: P, endidness: Endidness) -> Result<Self> {
-        Self::from_file_with_offset(path, 0, endidness)
+    fn from_vec(items: Vec<Self::Item>) -> Result<Self> {
+        Self::from_vec_with_offset(items, 0)
     }
 
-    #[cfg(feature = "bytes")]
-    fn from_bytes_with_offset(
-        bytes: Bytes,
-        initial_offset: u64,
-        endidness: Endidness,
-    ) -> Result<Self>;
+    fn from_vec_with_offset(items: Vec<Self::Item>, initial_offset: usize) -> Result<Self>;
 
-    #[cfg(feature = "bytes")]
-    fn from_bytes(bytes: Bytes, endidness: Endidness) -> Result<Self> {
-        Self::from_bytes_with_offset(bytes, 0, endidness)
-    }
-
-    fn validate_offset(&self, offset: u64) -> Result<()> {
+    fn validate_offset(&self, offset: usize) -> Result<()> {
         if offset < self.lower_offset_limit() {
             Err(Error::OffsetTooSmall(offset))
         } else if offset > self.upper_offset_limit() {
@@ -59,43 +43,91 @@ pub trait Source: Sized + Sync + Send {
     /// The amount of data in the reader. If the reader's size changes (which none of the
     /// implementations currently do), then this should return how much data was *initially* in the
     /// reader.
-    fn size(&self) -> u64;
+    fn size(&self) -> usize;
 
     /// The initial offset of the [`Source`]. For more information, see the **Offsets** section
     /// of the [`Source`] documentation.
-    fn initial_offset(&self) -> u64;
+    fn initial_offset(&self) -> usize;
 
-    /// The endidness of the reader.
-    fn endidness(&self) -> Endidness;
-
-    /// Changes the default endidness.
-    fn change_endidness(&mut self, endidness: Endidness);
-
-    fn all(&self) -> Result<Segment> {
+    fn all(&self) -> Result<Segment<Self::Item>> {
         self.segment(self.lower_offset_limit(), self.upper_offset_limit())
     }
 
-    fn segment(&self, start: u64, end: u64) -> Result<Segment>;
-
-    #[cfg(feature = "async")]
-    fn async_all(&self) -> Result<AsyncSegment> {
-        self.async_segment(self.lower_offset_limit(), self.upper_offset_limit())
-    }
-
-    #[cfg(feature = "async")]
-    fn async_segment(&self, start: u64, end: u64) -> Result<AsyncSegment>;
+    fn segment(&self, start: usize, end: usize) -> Result<Segment<Self::Item>>;
 
     #[inline]
     /// The lowest valid offset that can be requested. By default, this is the same as
     /// [`Source::initial_offset`].
-    fn lower_offset_limit(&self) -> u64 {
+    fn lower_offset_limit(&self) -> usize {
         self.initial_offset()
     }
 
     #[inline]
     /// The highest valid offset that can be requested. By default, this is the reader's
     /// [`Source::size`] plus its [`Source::initial_offset`].
-    fn upper_offset_limit(&self) -> u64 {
+    fn upper_offset_limit(&self) -> usize {
         self.size() + self.initial_offset()
+    }
+}
+
+pub trait U8Source: Source<Item = u8> {
+    /// The endidness of the reader.
+    fn endidness(&self) -> Endidness;
+
+    /// Changes the default endidness.
+    fn change_endidness(&mut self, endidness: Endidness);
+
+    #[inline]
+    fn from_u8_slice(slice: &[u8], endidness: Endidness) -> Result<Self> {
+        Self::from_u8_slice_with_offset(slice, 0, endidness)
+    }
+
+    fn from_u8_slice_with_offset(
+        slice: &[u8],
+        initial_offset: usize,
+        endidness: Endidness,
+    ) -> Result<Self>;
+
+    #[inline]
+    fn from_u8_vec(items: Vec<u8>, endidness: Endidness) -> Result<Self> {
+        Self::from_u8_vec_with_offset(items, 0, endidness)
+    }
+
+    #[inline]
+    fn from_u8_vec_with_offset(
+        items: Vec<u8>,
+        initial_offset: usize,
+        endidness: Endidness,
+    ) -> Result<Self> {
+        Self::from_u8_slice_with_offset(&items, initial_offset, endidness)
+    }
+
+    fn from_file_with_offset<P: AsRef<Path>>(
+        path: P,
+        initial_offset: usize,
+        endidness: Endidness,
+    ) -> Result<Self>;
+
+    #[inline]
+    fn from_file<P: AsRef<Path>>(path: P, endidness: Endidness) -> Result<Self> {
+        Self::from_file_with_offset(path, 0, endidness)
+    }
+
+    #[cfg(feature = "bytes")]
+    fn from_bytes_with_offset(
+        bytes: Bytes,
+        initial_offset: usize,
+        endidness: Endidness,
+    ) -> Result<Self>;
+
+    #[cfg(feature = "bytes")]
+    #[inline]
+    fn from_bytes(bytes: Bytes, endidness: Endidness) -> Result<Self> {
+        Self::from_bytes_with_offset(bytes, 0, endidness)
+    }
+
+    #[inline]
+    fn segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
+        Source::segment(self, start, end)
     }
 }

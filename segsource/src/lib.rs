@@ -15,8 +15,8 @@ pub use error::*;
 pub(crate) mod segment;
 pub use segment::*;
 
-//#[cfg(test)]
-//mod testing;
+#[cfg(test)]
+mod testing;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Endidness {

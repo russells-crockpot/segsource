@@ -1,18 +1,16 @@
-#[cfg(feature = "async")]
-use crate::segment::AsyncSegment;
-use crate::{Endidness, Result, Segment, Source};
+use crate::{Endidness, Result, Segment, Source, U8Source};
 use bytes::{BufMut as _, Bytes, BytesMut};
 use std::{fs, io, path::Path};
 
 pub struct BytesSource {
-    initial_offset: u64,
+    initial_offset: usize,
     data: Bytes,
     endidness: Endidness,
 }
 
 impl BytesSource {
     #[inline]
-    fn new(data: Bytes, initial_offset: u64, endidness: Endidness) -> Self {
+    fn new(data: Bytes, initial_offset: usize, endidness: Endidness) -> Self {
         Self {
             initial_offset,
             data,
@@ -22,10 +20,40 @@ impl BytesSource {
 }
 
 impl Source for BytesSource {
+    type Item = u8;
+
+    #[inline]
+    fn initial_offset(&self) -> usize {
+        self.initial_offset
+    }
+
+    #[inline]
+    fn size(&self) -> usize {
+        self.data.len() as usize
+    }
+
+    #[inline]
+    fn from_vec_with_offset(items: Vec<Self::Item>, initial_offset: usize) -> Result<Self> {
+        Self::from_u8_vec_with_offset(items, initial_offset, Endidness::Unknown)
+    }
+
+    fn segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
+        self.validate_offset(start)?;
+        self.validate_offset(end)?;
+        Ok(Segment::with_offset_and_endidness(
+            &self.data
+                [(start - self.initial_offset) as usize..(end - self.initial_offset) as usize],
+            start,
+            self.endidness,
+        ))
+    }
+}
+
+impl U8Source for BytesSource {
     #[inline]
     fn from_file_with_offset<P: AsRef<Path>>(
         path: P,
-        initial_offset: u64,
+        initial_offset: usize,
         endidness: Endidness,
     ) -> Result<Self> {
         Ok(Self::new(bytes_from_file(path)?, initial_offset, endidness))
@@ -34,20 +62,10 @@ impl Source for BytesSource {
     #[inline]
     fn from_bytes_with_offset(
         bytes: Bytes,
-        initial_offset: u64,
+        initial_offset: usize,
         endidness: Endidness,
     ) -> Result<Self> {
         Ok(Self::new(bytes, initial_offset, endidness))
-    }
-
-    #[inline]
-    fn initial_offset(&self) -> u64 {
-        self.initial_offset
-    }
-
-    #[inline]
-    fn size(&self) -> u64 {
-        self.data.len() as u64
     }
 
     #[inline]
@@ -60,26 +78,25 @@ impl Source for BytesSource {
         self.endidness = endidness
     }
 
-    fn segment(&self, start: u64, end: u64) -> Result<Segment> {
-        self.validate_offset(start)?;
-        self.validate_offset(end)?;
-        Ok(Segment::from_slice_with_offset(
-            &self.data
-                [(start - self.initial_offset) as usize..(end - self.initial_offset) as usize],
-            start,
-            self.endidness,
-        ))
+    #[inline]
+    fn from_u8_vec_with_offset(
+        items: Vec<u8>,
+        initial_offset: usize,
+        endidness: Endidness,
+    ) -> Result<Self> {
+        Ok(Self::new(Bytes::from(items), initial_offset, endidness))
     }
 
-    #[cfg(feature = "async")]
-    fn async_segment(&self, start: u64, end: u64) -> Result<AsyncSegment> {
-        self.validate_offset(start)?;
-        self.validate_offset(end)?;
-        Ok(AsyncSegment::from_slice_with_offset(
-            &self.data
-                [(start - self.initial_offset) as usize..(end - self.initial_offset) as usize],
-            start,
-            self.endidness,
+    #[inline]
+    fn from_u8_slice_with_offset(
+        items: &[u8],
+        initial_offset: usize,
+        endidness: Endidness,
+    ) -> Result<Self> {
+        Ok(Self::new(
+            Bytes::copy_from_slice(items),
+            initial_offset,
+            endidness,
         ))
     }
 }

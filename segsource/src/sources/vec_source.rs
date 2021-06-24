@@ -1,19 +1,17 @@
-#[cfg(feature = "async")]
-use crate::segment::AsyncSegment;
-use crate::{Endidness, Result, Segment, Source};
+use crate::{Endidness, Result, Segment, Source, U8Source};
 #[cfg(feature = "bytes")]
 use bytes::Bytes;
 use std::{fs, io::Read as _, path::Path};
 
-pub struct VecSource {
-    initial_offset: u64,
-    data: Vec<u8>,
+pub struct VecSource<I: Sync + Send> {
+    initial_offset: usize,
+    data: Vec<I>,
     endidness: Endidness,
 }
 
-impl VecSource {
+impl<I: Sync + Send> VecSource<I> {
     #[inline]
-    fn new(data: Vec<u8>, initial_offset: u64, endidness: Endidness) -> Self {
+    fn new(data: Vec<I>, initial_offset: usize, endidness: Endidness) -> Self {
         Self {
             initial_offset,
             data,
@@ -22,11 +20,53 @@ impl VecSource {
     }
 }
 
-impl Source for VecSource {
+impl<I: Sync + Send> Source for VecSource<I> {
+    type Item = I;
+
+    #[inline]
+    fn initial_offset(&self) -> usize {
+        self.initial_offset
+    }
+
+    #[inline]
+    fn size(&self) -> usize {
+        self.data.len() as usize
+    }
+
+    #[inline]
+    fn from_vec_with_offset(items: Vec<Self::Item>, initial_offset: usize) -> Result<Self> {
+        Ok(Self {
+            initial_offset,
+            data: items,
+            endidness: Endidness::Unknown,
+        })
+    }
+
+    fn segment(&self, start: usize, end: usize) -> Result<Segment<I>> {
+        self.validate_offset(start)?;
+        self.validate_offset(end)?;
+        Ok(Segment::with_offset(
+            &self.data
+                [(start - self.initial_offset) as usize..(end - self.initial_offset) as usize],
+            start,
+        ))
+    }
+}
+
+impl U8Source for VecSource<u8> {
+    #[inline]
+    fn endidness(&self) -> Endidness {
+        self.endidness
+    }
+
+    #[inline]
+    fn change_endidness(&mut self, endidness: Endidness) {
+        self.endidness = endidness;
+    }
     #[inline]
     fn from_file_with_offset<P: AsRef<Path>>(
         path: P,
-        initial_offset: u64,
+        initial_offset: usize,
         endidness: Endidness,
     ) -> Result<Self> {
         let md = path.as_ref().metadata()?;
@@ -42,7 +82,7 @@ impl Source for VecSource {
     #[cfg(feature = "bytes")]
     fn from_bytes_with_offset(
         bytes: Bytes,
-        initial_offset: u64,
+        initial_offset: usize,
         endidness: Endidness,
     ) -> Result<Self> {
         Ok(Self::new(
@@ -53,41 +93,26 @@ impl Source for VecSource {
     }
 
     #[inline]
-    fn initial_offset(&self) -> u64 {
-        self.initial_offset
+    fn from_u8_vec_with_offset(
+        items: Vec<u8>,
+        initial_offset: usize,
+        endidness: Endidness,
+    ) -> Result<Self> {
+        Ok(Self::new(items, initial_offset, endidness))
     }
 
-    #[inline]
-    fn size(&self) -> u64 {
-        self.data.len() as u64
+    fn from_u8_slice_with_offset(
+        items: &[u8],
+        initial_offset: usize,
+        endidness: Endidness,
+    ) -> Result<Self> {
+        Ok(Self::new(Vec::from(items), initial_offset, endidness))
     }
 
-    #[inline]
-    fn endidness(&self) -> Endidness {
-        self.endidness
-    }
-
-    #[inline]
-    fn change_endidness(&mut self, endidness: Endidness) {
-        self.endidness = endidness
-    }
-
-    fn segment(&self, start: u64, end: u64) -> Result<Segment> {
+    fn segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
         self.validate_offset(start)?;
         self.validate_offset(end)?;
-        Ok(Segment::from_slice_with_offset(
-            &self.data
-                [(start - self.initial_offset) as usize..(end - self.initial_offset) as usize],
-            start,
-            self.endidness,
-        ))
-    }
-
-    #[cfg(feature = "async")]
-    fn async_segment(&self, start: u64, end: u64) -> Result<AsyncSegment> {
-        self.validate_offset(start)?;
-        self.validate_offset(end)?;
-        Ok(AsyncSegment::from_slice_with_offset(
+        Ok(Segment::with_offset_and_endidness(
             &self.data
                 [(start - self.initial_offset) as usize..(end - self.initial_offset) as usize],
             start,

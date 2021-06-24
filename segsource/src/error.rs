@@ -3,12 +3,12 @@ use std::io;
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("An offset of 0x{0:x} is too small.")]
-    OffsetTooSmall(u64),
+    OffsetTooSmall(usize),
     #[error("An offset of 0x{0:x} is too large.")]
-    OffsetTooLarge(u64),
+    OffsetTooLarge(usize),
     #[error("Requested {0} bytes, but only {1} bytes left.")]
     /// NotEnoughData(bytes requested, bytes remaining)
-    NotEnoughData(usize, u64),
+    NotEnoughData(usize, usize),
     #[error("Attempted to call a method that requires knowing the endidness.")]
     UnknownEndidness,
     #[error("No more data left.")]
