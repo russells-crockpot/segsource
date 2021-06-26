@@ -109,7 +109,7 @@ impl U8Source for VecSource<u8> {
         Ok(Self::new(Vec::from(items), initial_offset, endidness))
     }
 
-    fn segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
+    fn u8_segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
         self.validate_offset(start)?;
         self.validate_offset(end)?;
         Ok(Segment::with_offset_and_endidness(

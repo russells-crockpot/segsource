@@ -2,6 +2,7 @@ use crate::{Endidness, Result, Segment, Source, U8Source};
 use bytes::{BufMut as _, Bytes, BytesMut};
 use std::{fs, io, path::Path};
 
+#[derive(Clone)]
 pub struct BytesSource {
     initial_offset: usize,
     data: Bytes,
@@ -99,6 +100,11 @@ impl U8Source for BytesSource {
             endidness,
         ))
     }
+
+    #[inline]
+    fn u8_segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
+        Source::segment(self, start, end)
+    }
 }
 
 fn bytes_from_file<P: AsRef<Path>>(path: P) -> io::Result<Bytes> {
@@ -123,5 +129,11 @@ fn bytes_from_bufread<R: io::BufRead>(mut reader: R, capacity: Option<usize>) ->
             buf.len()
         };
         reader.consume(buf_len);
+    }
+}
+
+impl From<BytesSource> for Bytes {
+    fn from(src: BytesSource) -> Bytes {
+        src.data
     }
 }

@@ -1,3 +1,4 @@
+#![allow(clippy::needless_range_loop)]
 use crate::{
     error::{Error, Result},
     Endidness,
@@ -62,8 +63,8 @@ impl<'s, I> Segment<'s, I> {
         let pos = self.adj_pos(num_items as i128)?;
         Ok(Self::new_full(
             &self.data[pos..pos + num_items],
-            self.initial_offset,
-            pos,
+            self.initial_offset + pos,
+            0,
             self.endidness,
         ))
     }
@@ -101,19 +102,21 @@ impl<'s, I> Segment<'s, I> {
     fn adj_pos(&self, amt: i128) -> Result<usize> {
         let mut result = Ok(());
         let prev_pos = {
-            let res_ref = &mut result;
-            self.position
+            let rval = self
+                .position
                 .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |p| {
-                    let r = self.validate_pos(p, 0);
-                    if r.is_ok() {
-                        Some((p as i128 + amt) as usize)
+                    let new_pos = (p as i128 + amt) as usize;
+                    result = self.validate_pos(new_pos, 0);
+                    if result.is_ok() {
+                        Some(new_pos)
                     } else {
-                        *res_ref = r;
                         None
                     }
-                })
-                .map_err(|e| e)
-                .unwrap()
+                });
+            match rval {
+                Ok(v) => v,
+                Err(v) => v,
+            }
         };
         match result {
             Err(e) => Err(e),
@@ -167,9 +170,24 @@ impl<'s, I> Segment<'s, I> {
     #[inline]
     /// Gets a pointer to a slice of the byte at the [`Segment::current_offset`], as well as all
     /// all bytes afterwards. This does not alter the [`Segment::current_offset`].
-    pub fn get_remaining(&self) -> Result<&[I]> {
+    pub fn get_remaining_as_slice(&self) -> Result<&[I]> {
         let pos = self.adj_pos(self.remaining() as i128)?;
         Ok(&self.data[pos..])
+    }
+
+    #[inline]
+    /// Gets a pointer to a slice of the byte at the [`Segment::current_offset`], as well as all
+    /// all bytes afterwards. This does not alter the [`Segment::current_offset`].
+    pub fn get_remaining(&self) -> Result<Self> {
+        let remaining = self.remaining();
+        //TODO remaining may have change between here
+        let pos = self.adj_pos(remaining as i128)?;
+        Ok(Self::new_full(
+            &self.data[pos..pos + remaining],
+            self.initial_offset + pos,
+            0,
+            self.endidness,
+        ))
     }
 
     #[inline]
@@ -196,7 +214,11 @@ impl<'s, I> Segment<'s, I> {
     #[inline]
     /// The amount of data left, based off of the [`Segment::current_offset`].
     fn calc_remaining(&self, pos: usize) -> usize {
-        self.size - pos
+        if pos > self.size {
+            0
+        } else {
+            self.size - pos
+        }
     }
 
     #[inline]
@@ -280,16 +302,12 @@ where
     /// Returns `true` if the next bytes are the same as the ones provided.
     pub fn next_items_are(&self, prefix: &[I]) -> Result<bool> {
         self.validate_offset(self.current_offset(), prefix.len())?;
-        let mut buf = Vec::with_capacity(prefix.len());
-        self.item_refs_at(self.current_offset(), &mut buf)?;
-        if buf.len() != prefix.len() {
-            Ok(false)
-        } else {
-            Ok(prefix
-                .iter()
-                .zip(buf.into_iter())
-                .all(|(v1, v2)| *v1 == *v2))
+        for i in 0..prefix.len() {
+            if prefix[i] != self[self.current_offset() + i] {
+                return Ok(false);
+            }
         }
+        Ok(true)
     }
 }
 
@@ -616,9 +634,9 @@ macro_rules! add_idx_range {
                     Bound::Included(i) => i - self.initial_offset,
                     Bound::Excluded(i) => (i + 1) - self.initial_offset,
                 };
-                let end = match idx.start_bound() {
+                let end = match idx.end_bound() {
                     Bound::Unbounded => self.size,
-                    Bound::Included(i) => i - self.initial_offset - 1,
+                    Bound::Included(i) => (i + 1) - self.initial_offset,
                     Bound::Excluded(i) => i - self.initial_offset,
                 };
                 &self.data[start..end]
@@ -655,6 +673,7 @@ impl<'s> io::Read for Segment<'s, u8> {
         }
     }
 }
+
 impl<'s> io::Seek for Segment<'s, u8> {
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
         match pos {
@@ -707,8 +726,10 @@ mod sync {
     use super::Segment;
     use crate::error::Error;
     use std::{
+        cmp::min,
         io,
         pin::Pin,
+        sync::atomic::Ordering,
         task::{Context, Poll},
     };
     use tokio::io::{AsyncBufRead, AsyncRead, AsyncSeek, ReadBuf};
@@ -719,14 +740,24 @@ mod sync {
             _: &mut Context,
             buf: &mut ReadBuf,
         ) -> Poll<io::Result<()>> {
-            match self.next_n_as_slice(buf.capacity() - buf.filled().len()) {
-                Ok(data) => {
-                    buf.put_slice(data);
-                    Poll::Ready(Ok(()))
-                }
-                Err(Error::IoError(e)) => Poll::Ready(Err(e)),
-                Err(e) => panic!("{}", e),
+            let to_fill = buf.capacity() - buf.filled().len();
+            let mut end: usize = 0;
+            let maybe_pos = self
+                .position
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+                    let remaining = self.calc_remaining(n);
+                    if remaining == 0 {
+                        None
+                    } else {
+                        let new = min(n + to_fill, n + remaining);
+                        end = new;
+                        Some(new)
+                    }
+                });
+            if let Ok(pos) = maybe_pos {
+                buf.put_slice(&self.data[pos..end]);
             }
+            Poll::Ready(Ok(()))
         }
     }
 
@@ -752,18 +783,17 @@ mod sync {
 
     impl<'r> AsyncBufRead for Segment<'r, u8> {
         fn poll_fill_buf(self: Pin<&mut Self>, _: &mut Context) -> Poll<io::Result<&[u8]>> {
-            let me = self.get_mut();
-            match me.next_n_as_slice(4096) {
-                Ok(data) => Poll::Ready(Ok(data)),
-                Err(Error::IoError(e)) => Poll::Ready(Err(e)),
-                Err(e) => panic!("{}", e),
+            if self.remaining() == 0 {
+                Poll::Ready(Ok(&[]))
+            } else {
+                let pos = self.get_pos();
+                let to_get = min(8192, self.calc_remaining(pos));
+                Poll::Ready(Ok(&self.data[pos..pos + to_get]))
             }
         }
 
         fn consume(self: Pin<&mut Self>, amount: usize) {
-            let me = self.get_mut();
-            let lock = me.position.get_mut();
-            *lock += amount;
+            self.adj_pos(amount as i128).unwrap();
         }
     }
 }

@@ -1,7 +1,5 @@
 //!
 
-#![allow(clippy::needless_range_loop)]
-
 // Needed for some macros to work in this package.
 #[allow(unused_imports)]
 use crate as segsource;
@@ -23,4 +21,15 @@ pub enum Endidness {
     Big,
     Little,
     Unknown,
+}
+
+impl Endidness {
+    #[cfg(target_endian = "big")]
+    pub fn native() -> Self {
+        Self::Big
+    }
+    #[cfg(target_endian = "little")]
+    pub fn native() -> Self {
+        Self::Little
+    }
 }

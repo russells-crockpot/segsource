@@ -1,45 +1,42 @@
 [package]
 name = "segsource"
-version = "0.2.1"
+version = "0.1.0"
 authors = [ "Brendan McGloin <stmonkeydoom@gmail.com>",]
 edition = "2018"
 license = "MIT"
-description = "A helper library to make reading binary data more pleasant."
+description = "A helper library to make reading data more pleasant."
 homepage = "https://github.com/russells-crockpot/segsource"
 repository = "https://github.com/russells-crockpot/segsource"
 readme = "../README.md"
 documentation = "https://docs.rs/segsource/"
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
-bytes = { version = "1.0.1", optional = true}
-thiserror = "1.0.25"
-tokio = { version = "1.7.1", optional = true, features = ["sync"] }
-async-trait = { version = "0.1.50", optional = true }
-cfg-if = "1.0.0"
+bytes = { version = "1.0", optional = true}
+thiserror = "1.0"
+tokio = { version = "1.7", optional = true }
 
 [features]
 default = []
 memmap = [ "fs3", "memmap2",]
-nom-support = [ "nom", "segsource-internal-macros/nom",]
-thread-safe = []
 async = ["tokio"]
 
 [dependencies.fs3]
-version = "0.5.0"
+version = "0.5"
 optional = true
 
 [dependencies.memmap2]
-version = "0.3.0"
+version = "0.3"
 optional = true
-
-[dependencies.nom]
-version = "6.1.2"
-optional = true
-
-[dependencies.segsource-internal-macros]
-path = "../internal-macros"
-version = "0.2.1"
 
 [dependencies.segsource-macros]
 path = "../macros"
-version = "0.2.1"
+version = "0.1.0"
+
+#[dependencies.here]
+#path = "../../here"
+#version = "1.0.0"
+#features = ["log"]

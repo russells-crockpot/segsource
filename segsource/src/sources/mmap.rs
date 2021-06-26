@@ -5,13 +5,17 @@ use fs3::FileExt as _;
 use memmap2::Mmap;
 #[cfg(feature = "bytes")]
 use memmap2::MmapMut;
-use std::{fs::File, path::Path};
+use std::{
+    fs::File,
+    path::{Path, PathBuf},
+};
 
 pub struct MappedFileSource {
     initial_offset: usize,
     data: Mmap,
     endidness: Endidness,
     maybe_mapped_file: Option<File>,
+    maybe_path: Option<PathBuf>,
 }
 
 impl MappedFileSource {
@@ -21,13 +25,19 @@ impl MappedFileSource {
         data: Mmap,
         endidness: Endidness,
         maybe_mapped_file: Option<File>,
+        maybe_path: Option<PathBuf>,
     ) -> Self {
         Self {
             initial_offset,
             data,
             endidness,
             maybe_mapped_file,
+            maybe_path,
         }
+    }
+
+    pub fn path(&self) -> Option<&Path> {
+        self.maybe_path.as_ref().map(|p| p.as_ref())
     }
 }
 
@@ -67,10 +77,16 @@ impl U8Source for MappedFileSource {
         initial_offset: usize,
         endidness: Endidness,
     ) -> Result<Self> {
-        let file = File::open(path)?;
+        let file = File::open(&path)?;
         file.try_lock_shared()?;
         let mmap = unsafe { Mmap::map(&file)? };
-        Ok(Self::new(initial_offset, mmap, endidness, Some(file)))
+        Ok(Self::new(
+            initial_offset,
+            mmap,
+            endidness,
+            Some(file),
+            Some(path.as_ref().to_path_buf()),
+        ))
     }
 
     #[cfg(feature = "bytes")]
@@ -95,6 +111,7 @@ impl U8Source for MappedFileSource {
             mmap_mut.make_read_only()?,
             endidness,
             None,
+            None,
         ))
     }
 
@@ -106,6 +123,11 @@ impl U8Source for MappedFileSource {
     #[inline]
     fn change_endidness(&mut self, endidness: Endidness) {
         self.endidness = endidness
+    }
+
+    #[inline]
+    fn u8_segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
+        Source::segment(self, start, end)
     }
 }
 

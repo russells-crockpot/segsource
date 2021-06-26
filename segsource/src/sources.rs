@@ -8,6 +8,9 @@ use std::path::Path;
 mod vec_source;
 pub use vec_source::VecSource;
 
+//mod segment_like;
+//pub use segment_like::*;
+
 #[cfg(feature = "bytes")]
 use bytes::Bytes;
 #[cfg(feature = "bytes")]
@@ -126,8 +129,5 @@ pub trait U8Source: Source<Item = u8> {
         Self::from_bytes_with_offset(bytes, 0, endidness)
     }
 
-    #[inline]
-    fn segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
-        Source::segment(self, start, end)
-    }
+    fn u8_segment(&self, start: usize, end: usize) -> Result<Segment<u8>>;
 }
