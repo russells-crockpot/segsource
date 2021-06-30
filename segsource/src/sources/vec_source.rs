@@ -1,7 +1,12 @@
+#[cfg(feature = "async")]
+use crate::util::async_u8_vec_from_file;
 use crate::{Endidness, Result, Segment, Source, U8Source};
 #[cfg(feature = "bytes")]
 use bytes::Bytes;
 use std::{fs, io::Read as _, path::Path};
+
+#[cfg(feature = "async")]
+use async_trait::async_trait;
 
 pub struct VecSource<I: Sync + Send> {
     initial_offset: usize,
@@ -53,6 +58,7 @@ impl<I: Sync + Send> Source for VecSource<I> {
     }
 }
 
+#[cfg_attr(feature = "async", async_trait)]
 impl U8Source for VecSource<u8> {
     #[inline]
     fn endidness(&self) -> Endidness {
@@ -63,6 +69,23 @@ impl U8Source for VecSource<u8> {
     fn change_endidness(&mut self, endidness: Endidness) {
         self.endidness = endidness;
     }
+
+    #[cfg(feature = "async")]
+    async fn from_file_with_offset_async<P>(
+        path: P,
+        initial_offset: usize,
+        endidness: Endidness,
+    ) -> Result<Self>
+    where
+        P: AsRef<Path> + Sync + Send,
+    {
+        Ok(Self::new(
+            async_u8_vec_from_file(path).await?,
+            initial_offset,
+            endidness,
+        ))
+    }
+
     #[inline]
     fn from_file_with_offset<P: AsRef<Path>>(
         path: P,

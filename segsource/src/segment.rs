@@ -36,6 +36,53 @@ impl<'s, I> Segment<'s, I> {
             size,
         }
     }
+
+    #[inline]
+    fn get_pos(&self) -> usize {
+        self.position.load(Ordering::Relaxed)
+    }
+
+    fn set_pos(&self, pos: usize) -> Result<()> {
+        self.validate_pos(pos, 0)?;
+        self.position.store(pos, Ordering::Relaxed);
+        Ok(())
+    }
+
+    #[inline]
+    fn to_pos(&self, offset: usize) -> usize {
+        offset - self.initial_offset
+    }
+
+    fn adj_pos(&self, amt: i128) -> Result<usize> {
+        let mut result = Ok(());
+        let prev_pos = {
+            let rval = self
+                .position
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |p| {
+                    let new_pos = (p as i128 + amt) as usize;
+                    result = self.validate_pos(new_pos, 0);
+                    if result.is_ok() {
+                        Some(new_pos)
+                    } else {
+                        None
+                    }
+                });
+            match rval {
+                Ok(v) => v,
+                Err(v) => v,
+            }
+        };
+        match result {
+            Err(e) => Err(e),
+            Ok(_) => Ok(prev_pos),
+        }
+    }
+
+    #[inline]
+    fn inner_with_offset(data: &'s [I], initial_offset: usize, endidness: Endidness) -> Self {
+        Self::new_full(data, initial_offset, 0, endidness)
+    }
+
     #[inline]
     pub fn new(data: &'s [I]) -> Self {
         Self::new_full(data, 0, 0, Endidness::Unknown)
@@ -52,11 +99,6 @@ impl<'s, I> Segment<'s, I> {
     pub fn next_item_ref(&self) -> Result<&I> {
         let pos = self.adj_pos(1)?;
         Ok(&self.data[pos - 1])
-    }
-
-    #[inline]
-    fn to_pos(&self, offset: usize) -> usize {
-        offset - self.initial_offset
     }
 
     pub fn next_n(&self, num_items: usize) -> Result<Segment<I>> {
@@ -85,43 +127,7 @@ impl<'s, I> Segment<'s, I> {
     #[inline]
     /// Generates a new [`Segment`] using the provided slice, initial offset.
     pub fn with_offset(data: &'s [I], initial_offset: usize) -> Self {
-        Self::new_full(data, initial_offset, 0, Endidness::Unknown)
-    }
-
-    #[inline]
-    fn get_pos(&self) -> usize {
-        self.position.load(Ordering::Relaxed)
-    }
-
-    fn set_pos(&self, pos: usize) -> Result<()> {
-        self.validate_pos(pos, 0)?;
-        self.position.store(pos, Ordering::Relaxed);
-        Ok(())
-    }
-
-    fn adj_pos(&self, amt: i128) -> Result<usize> {
-        let mut result = Ok(());
-        let prev_pos = {
-            let rval = self
-                .position
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |p| {
-                    let new_pos = (p as i128 + amt) as usize;
-                    result = self.validate_pos(new_pos, 0);
-                    if result.is_ok() {
-                        Some(new_pos)
-                    } else {
-                        None
-                    }
-                });
-            match rval {
-                Ok(v) => v,
-                Err(v) => v,
-            }
-        };
-        match result {
-            Err(e) => Err(e),
-            Ok(_) => Ok(prev_pos),
-        }
+        Self::inner_with_offset(data, initial_offset, Endidness::Unknown)
     }
 
     #[inline]
@@ -227,6 +233,11 @@ impl<'s, I> Segment<'s, I> {
         self.calc_remaining(self.get_pos())
     }
 
+    #[inline]
+    pub fn has_more(&self) -> bool {
+        self.remaining() > 0
+    }
+
     /// Fills the provided buffer with bytes, starting at the provided offset. This does not alter
     /// the [`Segment::current_offset`].
     pub fn item_refs_at<'a>(&'s self, offset: usize, buf: &mut [&'a I]) -> Result<()>
@@ -274,23 +285,52 @@ impl<'s, I> Segment<'s, I> {
 
     /// Returns a subsequence (i.e. a `&[u8]`) of data of the requested size beginning at the
     /// provided offset.
-    pub fn get_n(&self, offset: usize, num_items: usize) -> Result<&[I]> {
+    pub fn get_n(&self, offset: usize, num_items: usize) -> Result<Segment<I>> {
         self.validate_offset(offset, num_items)?;
-        self.get_slice(offset, offset + num_items as usize)
+        Ok(Segment::inner_with_offset(
+            self.get_as_slice(offset, offset + num_items as usize)?,
+            offset,
+            self.endidness,
+        ))
+    }
+
+    /// Returns a subsequence (i.e. a `&[u8]`) of data of the requested size beginning at the
+    /// provided offset.
+    pub fn get_n_as_slice(&self, offset: usize, num_items: usize) -> Result<&[I]> {
+        self.validate_offset(offset, num_items)?;
+        self.get_as_slice(offset, offset + num_items as usize)
     }
 
     /// Returns a slice of the data between the provided starting and ending offsets.
-    pub fn get_slice(&self, start: usize, end: usize) -> Result<&[I]> {
+    pub fn get_as_slice(&self, start: usize, end: usize) -> Result<&[I]> {
         self.validate_offset(start, (end - start) as usize)?;
         Ok(&self.data[start as usize..end as usize])
     }
 
     pub fn segment(&self, start: usize, end: usize) -> Result<Segment<I>> {
         self.validate_offset(start, (end - start) as usize)?;
-        Ok(Segment::with_offset(
-            &self.data
-                [(start - self.initial_offset) as usize..(end - self.initial_offset) as usize],
+        Ok(Segment::inner_with_offset(
+            &self[start..end],
             start,
+            self.endidness,
+        ))
+    }
+
+    pub fn all_after(&self, offset: usize) -> Result<Segment<I>> {
+        self.validate_offset(offset, 0)?;
+        Ok(Segment::inner_with_offset(
+            &self[offset..],
+            offset,
+            self.endidness,
+        ))
+    }
+
+    pub fn all_before(&self, offset: usize) -> Result<Segment<I>> {
+        self.validate_offset(offset, 0)?;
+        Ok(Segment::inner_with_offset(
+            &self[..offset],
+            self.initial_offset,
+            self.endidness,
         ))
     }
 }

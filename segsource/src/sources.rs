@@ -24,6 +24,9 @@ mod mmap;
 #[cfg(feature = "memmap")]
 pub use mmap::MappedFileSource;
 
+#[cfg(feature = "async")]
+use async_trait::async_trait;
+
 pub trait Source: Sized + Sync + Send {
     type Item;
 
@@ -58,6 +61,17 @@ pub trait Source: Sized + Sync + Send {
 
     fn segment(&self, start: usize, end: usize) -> Result<Segment<Self::Item>>;
 
+    fn get_n(&self, offset: usize, num_items: usize) -> Result<Segment<Self::Item>> {
+        self.validate_offset(offset)?;
+        self.validate_offset(offset + num_items)?;
+        self.segment(offset, offset + num_items)
+    }
+
+    fn all_after(&self, offset: usize) -> Result<Segment<Self::Item>> {
+        self.validate_offset(offset)?;
+        self.get_n(offset, (self.size() + self.initial_offset()) - offset)
+    }
+
     #[inline]
     /// The lowest valid offset that can be requested. By default, this is the same as
     /// [`Source::initial_offset`].
@@ -73,6 +87,7 @@ pub trait Source: Sized + Sync + Send {
     }
 }
 
+#[cfg_attr(feature = "async", async_trait)]
 pub trait U8Source: Source<Item = u8> {
     /// The endidness of the reader.
     fn endidness(&self) -> Endidness;
@@ -114,6 +129,24 @@ pub trait U8Source: Source<Item = u8> {
     #[inline]
     fn from_file<P: AsRef<Path>>(path: P, endidness: Endidness) -> Result<Self> {
         Self::from_file_with_offset(path, 0, endidness)
+    }
+
+    #[cfg(feature = "async")]
+    async fn from_file_with_offset_async<P>(
+        path: P,
+        initial_offset: usize,
+        endidness: Endidness,
+    ) -> Result<Self>
+    where
+        P: AsRef<Path> + Sync + Send;
+
+    #[cfg(feature = "async")]
+    #[inline]
+    async fn from_file_async<P>(path: P, endidness: Endidness) -> Result<Self>
+    where
+        P: AsRef<Path> + Sync + Send,
+    {
+        Self::from_file_with_offset_async(path, 0, endidness).await
     }
 
     #[cfg(feature = "bytes")]

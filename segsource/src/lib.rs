@@ -1,5 +1,5 @@
 //!
-
+use std::fmt;
 // Needed for some macros to work in this package.
 #[allow(unused_imports)]
 use crate as segsource;
@@ -13,6 +13,8 @@ pub use error::*;
 pub(crate) mod segment;
 pub use segment::*;
 
+pub mod util;
+
 #[cfg(test)]
 mod testing;
 
@@ -21,6 +23,16 @@ pub enum Endidness {
     Big,
     Little,
     Unknown,
+}
+
+impl fmt::Display for Endidness {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Big => write!(f, "Big"),
+            Self::Little => write!(f, "Little"),
+            Self::Unknown => write!(f, "Unknown"),
+        }
+    }
 }
 
 impl Endidness {

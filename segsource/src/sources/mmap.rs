@@ -2,13 +2,16 @@ use crate::{Endidness, Result, Segment, Source, U8Source};
 #[cfg(feature = "bytes")]
 use bytes::Bytes;
 use fs3::FileExt as _;
-use memmap2::Mmap;
-#[cfg(feature = "bytes")]
-use memmap2::MmapMut;
+use memmap2::{Mmap, MmapMut};
 use std::{
     fs::File,
     path::{Path, PathBuf},
 };
+#[cfg(feature = "async")]
+use tokio::task::spawn_blocking;
+
+#[cfg(feature = "async")]
+use async_trait::async_trait;
 
 pub struct MappedFileSource {
     initial_offset: usize,
@@ -71,6 +74,7 @@ impl Source for MappedFileSource {
     }
 }
 
+#[cfg_attr(feature = "async", async_trait)]
 impl U8Source for MappedFileSource {
     fn from_file_with_offset<P: AsRef<Path>>(
         path: P,
@@ -97,6 +101,22 @@ impl U8Source for MappedFileSource {
         endidness: Endidness,
     ) -> Result<Self> {
         Self::from_u8_slice_with_offset(&bytes, initial_offset, endidness)
+    }
+
+    #[cfg(feature = "async")]
+    #[inline]
+    async fn from_file_with_offset_async<P>(
+        path: P,
+        initial_offset: usize,
+        endidness: Endidness,
+    ) -> Result<Self>
+    where
+        P: AsRef<Path> + Sync + Send,
+    {
+        let path = path.as_ref().to_path_buf();
+        spawn_blocking(move || Self::from_file_with_offset(path, initial_offset, endidness))
+            .await
+            .unwrap()
     }
 
     fn from_u8_slice_with_offset(

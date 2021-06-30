@@ -229,3 +229,33 @@ pub fn next_n_test() -> Result<()> {
     next_n_tests! { 50, 1, 4 };
     Ok(())
 }
+
+#[test]
+pub fn all_before() -> Result<()> {
+    let segment = Segment::new(&TEST_U8_DATA);
+    segment.move_by(3)?;
+    let before = segment.all_before(4)?;
+    assert_eq!(before.initial_offset(), 0);
+    assert_eq!(before.as_ref(), &TEST_U8_DATA[..4]);
+    let segment = Segment::with_offset(&TEST_U8_DATA, 5);
+    segment.move_by(3)?;
+    let before = segment.all_before(9)?;
+    assert_eq!(before.initial_offset(), 5);
+    assert_eq!(before.as_ref(), &TEST_U8_DATA[..4]);
+    Ok(())
+}
+
+#[test]
+pub fn all_after() -> Result<()> {
+    let segment = Segment::new(&TEST_U8_DATA);
+    segment.move_by(3)?;
+    let after = segment.all_after(10)?;
+    assert_eq!(after.initial_offset(), 10);
+    assert_eq!(after.as_ref(), &TEST_U8_DATA[10..]);
+    let segment = Segment::with_offset(&TEST_U8_DATA, 5);
+    segment.move_by(3)?;
+    let after = segment.all_after(15)?;
+    assert_eq!(after.initial_offset(), 15);
+    assert_eq!(after.as_ref(), &TEST_U8_DATA[10..]);
+    Ok(())
+}

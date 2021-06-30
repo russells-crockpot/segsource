@@ -1,6 +1,13 @@
+#[cfg(all(feature = "async", feature = "bytes"))]
+use crate::util::async_bytes_from_file;
+#[cfg(all(feature = "async", not(feature = "bytes")))]
+use crate::util::async_u8_vec_from_file;
 use crate::{Endidness, Result, Segment, Source, U8Source};
 use bytes::{BufMut as _, Bytes, BytesMut};
 use std::{fs, io, path::Path};
+
+#[cfg(feature = "async")]
+use async_trait::async_trait;
 
 #[derive(Clone)]
 pub struct BytesSource {
@@ -50,6 +57,7 @@ impl Source for BytesSource {
     }
 }
 
+#[cfg_attr(feature = "async", async_trait)]
 impl U8Source for BytesSource {
     #[inline]
     fn from_file_with_offset<P: AsRef<Path>>(
@@ -58,6 +66,38 @@ impl U8Source for BytesSource {
         endidness: Endidness,
     ) -> Result<Self> {
         Ok(Self::new(bytes_from_file(path)?, initial_offset, endidness))
+    }
+
+    #[cfg(all(feature = "async", feature = "bytes"))]
+    async fn from_file_with_offset_async<P>(
+        path: P,
+        initial_offset: usize,
+        endidness: Endidness,
+    ) -> Result<Self>
+    where
+        P: AsRef<Path> + Sync + Send,
+    {
+        Ok(Self::new(
+            async_bytes_from_file(path).await?,
+            initial_offset,
+            endidness,
+        ))
+    }
+
+    #[cfg(all(feature = "async", not(feature = "bytes")))]
+    async fn from_file_with_offset_async<P>(
+        path: P,
+        initial_offset: usize,
+        endidness: Endidness,
+    ) -> Result<Self>
+    where
+        P: AsRef<Path> + Sync + Send,
+    {
+        Ok(Self::new(
+            async_u8_vec_from_file(path).await?,
+            initial_offset,
+            endidness,
+        ))
     }
 
     #[inline]

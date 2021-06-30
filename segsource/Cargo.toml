@@ -17,12 +17,16 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 bytes = { version = "1.0", optional = true}
 thiserror = "1.0"
-tokio = { version = "1.7", optional = true }
+tokio = { version = "1.7", optional = true, features = ["fs", "io-util", "rt"]}
+bitvec = { version = "0.19", optional = true }
+async-trait = { version = "0.1.50", optional = true }
+pin-project-lite = { version = "0.2.6", optional = true }
+futures-core = { version = "0.3.15", optional = true }
 
 [features]
 default = []
 memmap = [ "fs3", "memmap2",]
-async = ["tokio"]
+async = ["tokio", "async-trait", "pin-project-lite", "futures-core"]
 
 [dependencies.fs3]
 version = "0.5"
