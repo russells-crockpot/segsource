@@ -22,6 +22,7 @@ bitvec = { version = "0.19", optional = true }
 async-trait = { version = "0.1.50", optional = true }
 pin-project-lite = { version = "0.2.6", optional = true }
 futures-core = { version = "0.3.15", optional = true }
+scroll = { version = "0.10.2", optional = true }
 
 [features]
 default = []

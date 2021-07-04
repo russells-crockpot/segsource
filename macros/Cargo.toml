@@ -24,3 +24,7 @@ features = [ "full",]
 [features]
 default = []
 async = []
+
+[dependencies.here]
+path = "/home/bmcgloin/workspace/here"
+version = "1.0.0"

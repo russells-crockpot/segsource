@@ -3,18 +3,29 @@ use crate::{
     error::{Error, Result},
     Endidness,
 };
-use segsource_macros::make_number_methods;
+use segsource_macros::{for_each_number, make_number_methods};
 use std::{
     borrow::Borrow,
+    convert::TryFrom,
     io,
     ops::{self, Bound, Index, RangeBounds as _},
     sync::atomic::{AtomicUsize, Ordering},
 };
 
+/// A segment of a [`crate::Source`].
+///
+/// This is where data is actually read from. Each segment keeps track of a few things:
+///
+///     1. An initial offset (retrievable via [`Segment::initial_offset`]).
+///     2. A cursor (retrievable via [`Segment::current_offset`]).
+///     3. A reference to the source's data.
+///
+/// Additionally, it the data type is [`u8`] then the [`Endidness`] is also kep track of.
 pub struct Segment<'s, I> {
     initial_offset: usize,
     position: AtomicUsize,
     data: &'s [I],
+    // We use the slice's len a lot, and it never changes, so we might as well cache it.
     size: usize,
     // Used for u8 segments
     endidness: Endidness,
@@ -27,13 +38,12 @@ impl<'s, I> Segment<'s, I> {
         position: usize,
         endidness: Endidness,
     ) -> Self {
-        let size = data.len();
         Self {
             initial_offset,
             position: AtomicUsize::new(position),
             data,
             endidness,
-            size,
+            size: data.len(),
         }
     }
 
@@ -88,6 +98,11 @@ impl<'s, I> Segment<'s, I> {
         Self::new_full(data, 0, 0, Endidness::Unknown)
     }
 
+    #[inline]
+    pub fn set_initial_offset(&mut self, offset: usize) {
+        self.initial_offset = offset;
+    }
+
     /// Returns slice of the requested size containing the next n bytes (where n is
     /// the `num_bytes` parameter) and then advances the cursor by that much.
     pub fn next_n_as_slice(&self, num_items: usize) -> Result<&[I]> {
@@ -125,7 +140,7 @@ impl<'s, I> Segment<'s, I> {
     }
 
     #[inline]
-    /// Generates a new [`Segment`] using the provided slice, initial offset.
+    /// Generates a new [`Segment`] using the provided slice and initial offset.
     pub fn with_offset(data: &'s [I], initial_offset: usize) -> Self {
         Self::inner_with_offset(data, initial_offset, Endidness::Unknown)
     }
@@ -337,6 +352,18 @@ impl<'s, I> Segment<'s, I> {
 
 impl<'s, I> Segment<'s, I>
 where
+    I: Default + Copy,
+{
+    pub fn next_n_as_array<const N: usize>(&self) -> Result<[I; N]> {
+        let pos = self.adj_pos(N as i128)?;
+        let mut array = [I::default(); N];
+        array[..N].clone_from_slice(&self.data[pos..(N + pos)]);
+        Ok(array)
+    }
+}
+
+impl<'s, I> Segment<'s, I>
+where
     I: PartialEq,
 {
     /// Returns `true` if the next bytes are the same as the ones provided.
@@ -393,7 +420,6 @@ impl<'s> Segment<'s, u8> {
         self.u8_at(self.current_offset())
     }
 
-    //TODO current, non-endian implementations.
     make_number_methods! {
         /// Gets the numendlong endian `numname` at the [`Segment::current_offset`] without
         /// altering the [`Segment::current_offset`].
@@ -401,6 +427,16 @@ impl<'s> Segment<'s, u8> {
             let mut buf = [0; _numwidth_];
             self.items_at(self.current_offset(), &mut buf)?;
             Ok(_numname_::from_numend_bytes(buf))
+        }
+    }
+
+    for_each_number! {
+        pub fn current_numname(&self) -> Result<_numname_> {
+            match self.endidness() {
+                Endidness::Big => self.current_numname_be(),
+                Endidness::Little => self.current_numname_le(),
+                Endidness::Unknown => Err(Error::UnknownEndidness),
+            }
         }
     }
 
@@ -420,91 +456,16 @@ impl<'s> Segment<'s, u8> {
         }
     }
 
-    /// Gets the `u16` using the default endidness at the provided offset without altering the
-    /// [`Segment::current_offset`]. If the current endidness is [`Endidness::Unknown`], then an
-    /// error is returned.
-    pub fn u16_at(&self, offset: usize) -> Result<u16> {
-        match self.endidness() {
-            Endidness::Big => self.u16_be_at(offset),
-            Endidness::Little => self.u16_le_at(offset),
-            Endidness::Unknown => Err(Error::UnknownEndidness),
-        }
-    }
-
-    /// Gets the `u32` using the default endidness at the provided offset without altering the
-    /// [`Segment::current_offset`]. If the current endidness is [`Endidness::Unknown`], then an
-    /// error is returned.
-    pub fn u32_at(&self, offset: usize) -> Result<u32> {
-        match self.endidness() {
-            Endidness::Big => self.u32_be_at(offset),
-            Endidness::Little => self.u32_le_at(offset),
-            Endidness::Unknown => Err(Error::UnknownEndidness),
-        }
-    }
-
-    /// Gets the `u64` using the default endidness at the provided offset without altering the
-    /// [`Segment::current_offset`]. If the current endidness is [`Endidness::Unknown`], then an
-    /// error is returned.
-    pub fn u64_at(&self, offset: usize) -> Result<u64> {
-        match self.endidness() {
-            Endidness::Big => self.u64_be_at(offset),
-            Endidness::Little => self.u64_le_at(offset),
-            Endidness::Unknown => Err(Error::UnknownEndidness),
-        }
-    }
-
-    /// Gets the `u128` using the default endidness at the provided offset without altering the
-    /// [`Segment::current_offset`]. If the current endidness is [`Endidness::Unknown`], then an
-    /// error is returned.
-    pub fn u128_at(&self, offset: usize) -> Result<u128> {
-        match self.endidness() {
-            Endidness::Big => self.u128_be_at(offset),
-            Endidness::Little => self.u128_le_at(offset),
-            Endidness::Unknown => Err(Error::UnknownEndidness),
-        }
-    }
-
-    /// Gets the `i16` using the default endidness at the provided offset without altering the
-    /// [`Segment::current_offset`]. If the current endidness is [`Endidness::Unknown`], then an
-    /// error is returned.
-    pub fn i16_at(&self, offset: usize) -> Result<i16> {
-        match self.endidness() {
-            Endidness::Big => self.i16_be_at(offset),
-            Endidness::Little => self.i16_le_at(offset),
-            Endidness::Unknown => Err(Error::UnknownEndidness),
-        }
-    }
-
-    /// Gets the `i32` using the default endidness at the provided offset without altering the
-    /// [`Segment::current_offset`]. If the current endidness is [`Endidness::Unknown`], then an
-    /// error is returned.
-    pub fn i32_at(&self, offset: usize) -> Result<i32> {
-        match self.endidness() {
-            Endidness::Big => self.i32_be_at(offset),
-            Endidness::Little => self.i32_le_at(offset),
-            Endidness::Unknown => Err(Error::UnknownEndidness),
-        }
-    }
-
-    /// Gets the `i64` using the default endidness at the provided offset without altering the
-    /// [`Segment::current_offset`]. If the current endidness is [`Endidness::Unknown`], then an
-    /// error is returned.
-    pub fn i64_at(&self, offset: usize) -> Result<i64> {
-        match self.endidness() {
-            Endidness::Big => self.i64_be_at(offset),
-            Endidness::Little => self.i64_le_at(offset),
-            Endidness::Unknown => Err(Error::UnknownEndidness),
-        }
-    }
-
-    /// Gets the `i128` using the default endidness at the provided offset without altering the
-    /// [`Segment::current_offset`]. If the current endidness is [`Endidness::Unknown`], then an
-    /// error is returned.
-    pub fn i128_at(&self, offset: usize) -> Result<i128> {
-        match self.endidness() {
-            Endidness::Big => self.i128_be_at(offset),
-            Endidness::Little => self.i128_le_at(offset),
-            Endidness::Unknown => Err(Error::UnknownEndidness),
+    for_each_number! {
+        /// Gets the `numname` using the default endidness at the provided offset without altering
+        /// the [`Segment::current_offset`]. If the current endidness is [`Endidness::Unknown`],
+        /// then an error is returned.
+        pub fn numname_at(&self, offset: usize) -> Result<_numname_> {
+            match self.endidness() {
+                Endidness::Big => self.numname_be_at(offset),
+                Endidness::Little => self.numname_le_at(offset),
+                Endidness::Unknown => Err(Error::UnknownEndidness),
+            }
         }
     }
 
@@ -518,50 +479,6 @@ impl<'s> Segment<'s, u8> {
         }
     }
 
-    /// Gets the `u16` using the default endidness at the [`Segment::current_offset`] and then
-    /// advances it by `1`. If the current endidness is [`Endidness::Unknown`], then an error is
-    /// returned.
-    pub fn next_u16(&self) -> Result<u16> {
-        match self.endidness() {
-            Endidness::Big => self.next_u16_be(),
-            Endidness::Little => self.next_u16_le(),
-            Endidness::Unknown => Err(Error::UnknownEndidness),
-        }
-    }
-
-    /// Gets the `u16` using the default endidness at the [`Segment::current_offset`] and then
-    /// advances it by `1`. If the current endidness is [`Endidness::Unknown`], then an error is
-    /// returned.
-    pub fn next_u32(&self) -> Result<u32> {
-        match self.endidness() {
-            Endidness::Big => self.next_u32_be(),
-            Endidness::Little => self.next_u32_le(),
-            Endidness::Unknown => Err(Error::UnknownEndidness),
-        }
-    }
-
-    /// Gets the `u16` using the default endidness at the [`Segment::current_offset`] and then
-    /// advances it by `1`. If the current endidness is [`Endidness::Unknown`], then an error is
-    /// returned.
-    pub fn next_u64(&self) -> Result<u64> {
-        match self.endidness() {
-            Endidness::Big => self.next_u64_be(),
-            Endidness::Little => self.next_u64_le(),
-            Endidness::Unknown => Err(Error::UnknownEndidness),
-        }
-    }
-
-    /// Gets the `u16` using the default endidness at the [`Segment::current_offset`] and then
-    /// advances it by `1`. If the current endidness is [`Endidness::Unknown`], then an error is
-    /// returned.
-    pub fn next_u128(&self) -> Result<u128> {
-        match self.endidness() {
-            Endidness::Big => self.next_u128_be(),
-            Endidness::Little => self.next_u128_le(),
-            Endidness::Unknown => Err(Error::UnknownEndidness),
-        }
-    }
-
     /// Gets the `i8` at the [`Segment::current_offset`] and then advances it by `1`. If the
     /// current endidness is [`Endidness::Unknown`], then an error is returned.
     pub fn next_i8(&self) -> Result<i8> {
@@ -570,47 +487,39 @@ impl<'s> Segment<'s, u8> {
         Ok(i8::from_be_bytes(buf))
     }
 
-    /// Gets the `i16` using the default endidness at the [`Segment::current_offset`] and then
-    /// advances it by `1`. If the current endidness is [`Endidness::Unknown`], then an error is
-    /// returned.
-    pub fn next_i16(&self) -> Result<i16> {
-        match self.endidness() {
-            Endidness::Big => self.next_i16_be(),
-            Endidness::Little => self.next_i16_le(),
-            Endidness::Unknown => Err(Error::UnknownEndidness),
+    for_each_number! {
+        /// Gets the `numname` using the default endidness at the [`Segment::current_offset`] and
+        /// then advances it by `1`. If the current endidness is [`Endidness::Unknown`], then an
+        /// error is returned.
+        pub fn next_numname(&self) -> Result<_numname_> {
+             match self.endidness() {
+                Endidness::Big => self.next_numname_be(),
+                Endidness::Little => self.next_numname_le(),
+                Endidness::Unknown => Err(Error::UnknownEndidness),
+            }
         }
     }
+}
 
-    /// Gets the `i32` using the default endidness at the [`Segment::current_offset`] and then
-    /// advances it by `1`. If the current endidness is [`Endidness::Unknown`], then an error is
-    /// returned.
-    pub fn next_i32(&self) -> Result<i32> {
-        match self.endidness() {
-            Endidness::Big => self.next_i32_be(),
-            Endidness::Little => self.next_i32_le(),
-            Endidness::Unknown => Err(Error::UnknownEndidness),
-        }
+impl<'s> TryFrom<&Segment<'s, u8>> for u8 {
+    type Error = Error;
+    fn try_from(segment: &Segment<'s, u8>) -> Result<Self> {
+        segment.next_u8()
     }
+}
 
-    /// Gets the `i64` using the default endidness at the [`Segment::current_offset`] and then
-    /// advances it by `1`. If the current endidness is [`Endidness::Unknown`], then an error is
-    /// returned.
-    pub fn next_i64(&self) -> Result<i64> {
-        match self.endidness() {
-            Endidness::Big => self.next_i64_be(),
-            Endidness::Little => self.next_i64_le(),
-            Endidness::Unknown => Err(Error::UnknownEndidness),
-        }
+impl<'s> TryFrom<&Segment<'s, u8>> for i8 {
+    type Error = Error;
+    fn try_from(segment: &Segment<'s, u8>) -> Result<Self> {
+        segment.next_i8()
     }
+}
 
-    /// Gets the `i128` using the default endidness at the [`Segment::current_offset`] and then
-    /// advances it by `1`. If the current endidness is [`Endidness::Unknown`], then an error is
-    /// returned.
-    pub fn next_i128(&self) -> Result<i128> {
-        match self.endidness() {
-            Endidness::Big => self.next_i128_be(),
-            Endidness::Little => self.next_i128_le(),
-            Endidness::Unknown => Err(Error::UnknownEndidness),
+for_each_number! {
+    impl<'s> TryFrom<&Segment<'s, u8>> for _numname_ {
+        type Error = Error;
+        fn try_from(segment: &Segment<'s, u8>) -> Result<Self> {
+            segment.next_numname()
         }
     }
 }

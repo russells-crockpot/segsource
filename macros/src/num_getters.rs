@@ -174,12 +174,26 @@ fn generate_at_impl(
     }
 }
 
+fn for_each_number_with_endidness(stream: &TokenStream, endidness: Endidness) -> TokenStream {
+    let mut out = TokenStream::new();
+    for num_info in NUMBERS.iter() {
+        out.extend(num_info.apply_to_stream(stream.clone(), endidness));
+    }
+    out
+}
+
 pub fn make_number_methods(stream: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let in_stream = TokenStream::from(stream);
     let mut out = I8_NUM_INFO.apply_to_stream(in_stream.clone(), Endidness::Native);
-    for num_info in NUMBERS.iter() {
-        out.extend(num_info.apply_to_stream(in_stream.clone(), Endidness::Big));
-        out.extend(num_info.apply_to_stream(in_stream.clone(), Endidness::Little));
-    }
+    out.extend(for_each_number_with_endidness(&in_stream, Endidness::Big));
+    out.extend(for_each_number_with_endidness(
+        &in_stream,
+        Endidness::Little,
+    ));
     out.into()
+}
+
+pub fn for_each_number(stream: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let in_stream = TokenStream::from(stream);
+    for_each_number_with_endidness(&in_stream, Endidness::Native).into()
 }
