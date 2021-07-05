@@ -1,9 +1,10 @@
 #![allow(clippy::needless_range_loop)]
+#![allow(unused_macros, dead_code)]
 use crate::{
     error::{Error, Result},
+    marker::Integer,
     Endidness,
 };
-use segsource_macros::{for_each_number, make_number_methods};
 use std::{
     borrow::Borrow,
     convert::TryFrom,
@@ -61,6 +62,11 @@ impl<'s, I> Segment<'s, I> {
     #[inline]
     fn to_pos(&self, offset: usize) -> usize {
         offset - self.initial_offset
+    }
+
+    #[inline]
+    fn pos_to_offset(&self, pos: usize) -> usize {
+        pos + self.initial_offset
     }
 
     fn adj_pos(&self, amt: i128) -> Result<usize> {
@@ -163,7 +169,7 @@ impl<'s, I> Segment<'s, I> {
     #[inline]
     /// The current offset of the reader's cursor.
     pub fn current_offset(&self) -> usize {
-        self.get_pos() + self.initial_offset
+        self.pos_to_offset(self.get_pos())
     }
 
     /// Sets the reader's [`Segment::current_offset`].
@@ -378,6 +384,21 @@ where
     }
 }
 
+macro_rules! make_num_method {
+    ($type:ty, $name:ident, $method:ident) => {
+        fn $name(&self) -> Result<$type> {
+            self.$method::<$type>()
+        }
+    };
+}
+macro_rules! make_num_method_with_offset {
+    ($type:ty, $name:ident, $method:ident) => {
+        fn $name(&self, offset: usize) -> Result<$type> {
+            self.$method::<$type>(offset)
+        }
+    };
+}
+
 impl<'s> Segment<'s, u8> {
     #[inline]
     pub fn with_endidness(data: &'s [u8], endidness: Endidness) -> Self {
@@ -391,12 +412,6 @@ impl<'s> Segment<'s, u8> {
         endidness: Endidness,
     ) -> Self {
         Self::new_full(data, initial_offset, 0, endidness)
-    }
-
-    /// Gets the current byte and then advances the cursor.
-    #[inline]
-    pub fn next_u8(&self) -> Result<u8> {
-        self.next_item()
     }
 
     #[inline]
@@ -414,30 +429,12 @@ impl<'s> Segment<'s, u8> {
         Ok(())
     }
 
-    /// Gets the [`u8`] at the [`Segment::current_offset`] without altering the
-    /// [`Segment::current_offset`].
-    pub fn current_u8(&self) -> Result<u8> {
-        self.u8_at(self.current_offset())
-    }
-
-    make_number_methods! {
-        /// Gets the numendlong endian `numname` at the [`Segment::current_offset`] without
-        /// altering the [`Segment::current_offset`].
-        pub fn current_numname_numend(&self) -> Result<_numname_> {
-            let mut buf = [0; _numwidth_];
-            self.items_at(self.current_offset(), &mut buf)?;
-            Ok(_numname_::from_numend_bytes(buf))
-        }
-    }
-
-    for_each_number! {
-        pub fn current_numname(&self) -> Result<_numname_> {
-            match self.endidness() {
-                Endidness::Big => self.current_numname_be(),
-                Endidness::Little => self.current_numname_le(),
-                Endidness::Unknown => Err(Error::UnknownEndidness),
-            }
-        }
+    pub fn int_at<I: Integer>(&self, offset: usize) -> Result<I> {
+        self.validate_offset(offset, I::WIDTH)?;
+        Ok(I::with_endidness(
+            &self[offset..offset + I::WIDTH],
+            self.endidness,
+        ))
     }
 
     /// Gets the `u8` at the provided offset without altering the [`Segment::current_offset`].
@@ -445,59 +442,51 @@ impl<'s> Segment<'s, u8> {
     pub fn u8_at(&self, offset: usize) -> Result<u8> {
         self.item_at(offset)
     }
+    make_num_method_with_offset! {u16, u16_at, int_at}
+    make_num_method_with_offset! {u32, u32_at, int_at}
+    make_num_method_with_offset! {u64, u64_at, int_at}
+    make_num_method_with_offset! {u128, u128_at, int_at}
+    make_num_method_with_offset! {i8, i8_at, int_at}
+    make_num_method_with_offset! {i16, i16_at, int_at}
+    make_num_method_with_offset! {i32, i32_at, int_at}
+    make_num_method_with_offset! {i64, i64_at, int_at}
+    make_num_method_with_offset! {i128, i128_at, int_at}
 
-    make_number_methods! {
-        /// Gets the numendlong endian `numname` at the provided offset without altering the
-        /// [`Segment::current_offset`].
-        pub fn numname_numend_at(&self, offset: usize) -> Result<_numname_> {
-            let mut buf = [0; _numwidth_];
-            self.items_at(offset, &mut buf)?;
-            Ok(_numname_::from_numend_bytes(buf))
-        }
+    #[inline]
+    pub fn current_int<I: Integer>(&self) -> Result<I> {
+        self.int_at(self.current_offset())
     }
 
-    for_each_number! {
-        /// Gets the `numname` using the default endidness at the provided offset without altering
-        /// the [`Segment::current_offset`]. If the current endidness is [`Endidness::Unknown`],
-        /// then an error is returned.
-        pub fn numname_at(&self, offset: usize) -> Result<_numname_> {
-            match self.endidness() {
-                Endidness::Big => self.numname_be_at(offset),
-                Endidness::Little => self.numname_le_at(offset),
-                Endidness::Unknown => Err(Error::UnknownEndidness),
-            }
-        }
+    make_num_method! {u8, current_u8, current_int}
+    make_num_method! {u16, current_u16, current_int}
+    make_num_method! {u32, current_u32, current_int}
+    make_num_method! {u64, current_u64, current_int}
+    make_num_method! {u128, current_u128, current_int}
+    make_num_method! {i8, current_i8, current_int}
+    make_num_method! {i16, current_i16, current_int}
+    make_num_method! {i32, current_i32, current_int}
+    make_num_method! {i64, current_i64, current_int}
+    make_num_method! {i128, current_i128, current_int}
+
+    pub fn next_int<I: Integer>(&self) -> Result<I> {
+        let pos = self.adj_pos(I::WIDTH as i128)?;
+        self.int_at(self.pos_to_offset(pos))
     }
 
-    make_number_methods! {
-        /// Gets the numendlong endian `numname` at the [`Segment::current_offset`] and then
-        /// advances it by `1`.
-        pub fn next_numname_numend(&self) -> Result<_numname_> {
-            let mut buf = [0; _numwidth_];
-            self.next_bytes(&mut buf)?;
-            Ok(_numname_::from_numend_bytes(buf))
-        }
-    }
+    make_num_method! {u16, next_u16, next_int}
+    make_num_method! {u32, next_u32, next_int}
+    make_num_method! {u64, next_u64, next_int}
+    make_num_method! {u128, next_u128, next_int}
+    make_num_method! {i8, next_i8, next_int}
+    make_num_method! {i16, next_i16, next_int}
+    make_num_method! {i32, next_i32, next_int}
+    make_num_method! {i64, next_i64, next_int}
+    make_num_method! {i128, next_i128, next_int}
 
-    /// Gets the `i8` at the [`Segment::current_offset`] and then advances it by `1`. If the
-    /// current endidness is [`Endidness::Unknown`], then an error is returned.
-    pub fn next_i8(&self) -> Result<i8> {
-        let mut buf = [0; 1];
-        self.next_bytes(&mut buf)?;
-        Ok(i8::from_be_bytes(buf))
-    }
-
-    for_each_number! {
-        /// Gets the `numname` using the default endidness at the [`Segment::current_offset`] and
-        /// then advances it by `1`. If the current endidness is [`Endidness::Unknown`], then an
-        /// error is returned.
-        pub fn next_numname(&self) -> Result<_numname_> {
-             match self.endidness() {
-                Endidness::Big => self.next_numname_be(),
-                Endidness::Little => self.next_numname_le(),
-                Endidness::Unknown => Err(Error::UnknownEndidness),
-            }
-        }
+    /// Gets the current byte and then advances the cursor.
+    #[inline]
+    pub fn next_u8(&self) -> Result<u8> {
+        self.next_item()
     }
 }
 
@@ -515,13 +504,15 @@ impl<'s> TryFrom<&Segment<'s, u8>> for i8 {
     }
 }
 
-for_each_number! {
-    impl<'s> TryFrom<&Segment<'s, u8>> for _numname_ {
-        type Error = Error;
-        fn try_from(segment: &Segment<'s, u8>) -> Result<Self> {
-            segment.next_numname()
+macro_rules! impl_try_from {
+    ($type:ty) => {
+        impl<'s> TryFrom<&Segment<'s, u8>> for $type {
+            type Error = Error;
+            fn try_from(segment: &Segment<'s, u8>) -> Result<Self> {
+                segment.next_int()
+            }
         }
-    }
+    };
 }
 
 impl<'s, I: Clone> Segment<'s, I> {

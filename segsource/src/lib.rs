@@ -13,6 +13,12 @@ pub use error::*;
 pub(crate) mod segment;
 pub use segment::*;
 
+mod marker;
+
+#[cfg(feature = "derive")]
+#[doc(inline)]
+pub use segsource_derive::{FromSegment, TryFromSegment};
+
 pub mod util;
 
 #[cfg(test)]
