@@ -1,3 +1,4 @@
+use crate::util::get_attr_value;
 use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
 use syn::{
@@ -6,6 +7,17 @@ use syn::{
     punctuated::Punctuated,
     Expr, ExprCall, ExprField, ExprLit, ExprPath, Field, Ident, Lit, LitInt, Path, Token, Type,
 };
+
+//TODO use these
+mod kw {
+    syn::custom_keyword!(skip);
+    syn::custom_keyword!(from_iter);
+    syn::custom_keyword!(map_each);
+    syn::custom_keyword!(from);
+    syn::custom_keyword!(try_from);
+    syn::custom_keyword!(size);
+    syn::custom_keyword!(default_value);
+}
 
 #[derive(PartialEq)]
 enum TryOption {
@@ -60,12 +72,18 @@ impl Parse for SizeOption {
                 if let Some(ident) = path.get_ident() {
                     Ok(Self::FieldName(ident.clone()))
                 } else {
-                    panic!("Invalid value {} for size option.", path.to_token_stream())
+                    Err(stream.error(format!(
+                        "Invalid value {} for size option.",
+                        path.to_token_stream()
+                    )))
                 }
             }
             Expr::Field(field) => Ok(Self::Field(field)),
             Expr::Call(call) => Ok(Self::Call(call)),
-            other => panic!("Invalid value {} for size option.", other.to_token_stream()),
+            other => Err(stream.error(format!(
+                "Invalid value {} for size option.",
+                other.to_token_stream()
+            ))),
         }
     }
 }
@@ -82,8 +100,8 @@ impl ToTokens for SizeOption {
 
 enum FromSegEntry {
     Skip,
-    MapEach(MapEachOption),
     FromIter,
+    MapEach(MapEachOption),
     From(FromOption),
     TryFrom(FromOption),
     Size(SizeOption),
@@ -91,11 +109,6 @@ enum FromSegEntry {
     Use(Path),
     Try(TryOption),
     If(Expr),
-}
-
-fn get_attr_value<P: Parse>(stream: ParseStream) -> ParseResult<P> {
-    stream.parse::<Token![=]>()?;
-    stream.parse::<P>()
 }
 
 impl FromSegEntry {
@@ -132,7 +145,7 @@ impl Parse for FromSegEntry {
                 } else if value == "nothing" {
                     Ok(Self::Try(TryOption::Nothing))
                 } else {
-                    panic!("Invalid try option: {}", value);
+                    Err(stream.error(format!("Invalid try option: {}", value)))
                 }
             }
         } else if stream.peek(Token![use]) {
@@ -170,7 +183,7 @@ impl Parse for FromSegEntry {
                     Ok(Self::TryFrom(FromOption::Default))
                 }
             } else {
-                panic!("Invalid from_seg name: {}", stream)
+                Err(stream.error(format!("Invalid from_seg name: {}", stream)))
             }
         }
     }
@@ -187,9 +200,9 @@ impl FromSegEntries {
 impl Parse for FromSegEntries {
     fn parse(stream: ParseStream) -> ParseResult<Self> {
         let content;
-        let meta_parser = Punctuated::<FromSegEntry, Token![,]>::parse_separated_nonempty;
+        let parser = Punctuated::<FromSegEntry, Token![,]>::parse_separated_nonempty;
         let _ = parenthesized!(content in stream);
-        Ok(Self(meta_parser(&content)?))
+        Ok(Self(parser(&content)?))
     }
 }
 

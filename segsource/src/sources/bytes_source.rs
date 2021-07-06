@@ -1,7 +1,7 @@
 #[cfg(all(feature = "async", feature = "bytes"))]
-use crate::util::async_bytes_from_file;
+use crate::sync::async_bytes_from_file;
 #[cfg(all(feature = "async", not(feature = "bytes")))]
-use crate::util::async_u8_vec_from_file;
+use crate::sync::async_u8_vec_from_file;
 use crate::{Endidness, Result, Segment, Source, U8Source};
 use bytes::{BufMut as _, Bytes, BytesMut};
 use std::{fs, io, path::Path};
@@ -10,6 +10,8 @@ use std::{fs, io, path::Path};
 use async_trait::async_trait;
 
 #[derive(Clone)]
+/// A [`U8Source`] that uses a `Bytes` object from the wonderful `bytes` crate to store its
+/// underlying data. This source can only use `u8`s as its item.
 pub struct BytesSource {
     initial_offset: usize,
     data: Bytes,
@@ -42,7 +44,7 @@ impl Source for BytesSource {
 
     #[inline]
     fn from_vec_with_offset(items: Vec<Self::Item>, initial_offset: usize) -> Result<Self> {
-        Self::from_u8_vec_with_offset(items, initial_offset, Endidness::Unknown)
+        Self::from_u8_vec_with_offset(items, initial_offset, Endidness::default())
     }
 
     fn segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
@@ -141,10 +143,10 @@ impl U8Source for BytesSource {
         ))
     }
 
-    #[inline]
-    fn u8_segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
-        Source::segment(self, start, end)
-    }
+    //#[inline]
+    //fn u8_segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
+    //Source::segment(self, start, end)
+    //}
 }
 
 fn bytes_from_file<P: AsRef<Path>>(path: P) -> io::Result<Bytes> {

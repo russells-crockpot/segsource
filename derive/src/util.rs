@@ -3,7 +3,7 @@ use std::{convert::TryFrom, iter::Cycle, ops::RangeInclusive};
 use syn::{
     parenthesized,
     parse::{Parse, ParseStream, Result as ParseResult},
-    GenericParam, Generics, Lifetime, LifetimeDef,
+    GenericParam, Generics, Lifetime, LifetimeDef, Token,
 };
 
 pub struct LifetimeGenerator(Vec<(char, Cycle<RangeInclusive<char>>)>);
@@ -97,6 +97,15 @@ impl<V: Parse> Parse for Parenthesized<V> {
 
 pub fn parse_parenthesized<V: Parse>(stream: TokenStream) -> syn::parse::Result<V> {
     syn::parse2::<Parenthesized<V>>(stream).map(|v| v.0)
+}
+
+pub fn parse_parenthesized2<V: Parse>(stream: ParseStream) -> syn::parse::Result<V> {
+    stream.parse::<Parenthesized<V>>().map(|v| v.0)
+}
+
+pub fn get_attr_value<P: Parse>(stream: ParseStream) -> ParseResult<P> {
+    stream.parse::<Token![=]>()?;
+    stream.parse::<P>()
 }
 
 #[cfg(test)]

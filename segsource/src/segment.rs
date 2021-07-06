@@ -1,27 +1,34 @@
 #![allow(clippy::needless_range_loop)]
-#![allow(unused_macros, dead_code)]
 use crate::{
     error::{Error, Result},
     marker::Integer,
     Endidness,
 };
-use std::{
+use core::{
     borrow::Borrow,
     convert::TryFrom,
-    io,
     ops::{self, Bound, Index, RangeBounds as _},
     sync::atomic::{AtomicUsize, Ordering},
 };
+use std::io;
 
 /// A segment of a [`crate::Source`].
 ///
 /// This is where data is actually read from. Each segment keeps track of a few things:
 ///
-///     1. An initial offset (retrievable via [`Segment::initial_offset`]).
-///     2. A cursor (retrievable via [`Segment::current_offset`]).
-///     3. A reference to the source's data.
+/// 1. An initial offset (retrievable via [`Segment::initial_offset`]).
+/// 2. A cursor (retrievable via [`Segment::current_offset`]).
+/// 3. A reference to the source's data.
 ///
-/// Additionally, it the data type is [`u8`] then the [`Endidness`] is also kep track of.
+/// ## Index op
+///
+/// Like slices, [`Segment`]s support indexes via `usize`s or ranges. A few important things to note
+/// about this:
+///
+/// 1. The value(s) provided should be offsets (see the crate's top-level documentation for more
+///    info and what this means).
+/// 2. Unlike with a [`Segment`]'s various methods, no validation of the provided offset occurs,
+///    potentially leading to a panic.
 pub struct Segment<'s, I> {
     initial_offset: usize,
     position: AtomicUsize,
@@ -101,22 +108,23 @@ impl<'s, I> Segment<'s, I> {
 
     #[inline]
     pub fn new(data: &'s [I]) -> Self {
-        Self::new_full(data, 0, 0, Endidness::Unknown)
+        Self::new_full(data, 0, 0, Endidness::default())
     }
 
+    /// Changes the initial offset.
     #[inline]
-    pub fn set_initial_offset(&mut self, offset: usize) {
+    pub fn change_initial_offset(&mut self, offset: usize) {
         self.initial_offset = offset;
     }
 
-    /// Returns slice of the requested size containing the next n bytes (where n is
-    /// the `num_bytes` parameter) and then advances the cursor by that much.
+    /// Returns a slice of the requested size containing the next n items (where n is
+    /// the `num_items` parameter) and then advances the [`Segment::current_offset`] by that much.
     pub fn next_n_as_slice(&self, num_items: usize) -> Result<&[I]> {
         let pos = self.adj_pos(num_items as i128)?;
         Ok(&self.data[pos..pos + num_items])
     }
 
-    /// Gets the current byte and then advances the cursor.
+    /// Gets a reference to the next item and then advances the [`Segment::current_offset`] by 1
     pub fn next_item_ref(&self) -> Result<&I> {
         let pos = self.adj_pos(1)?;
         Ok(&self.data[pos - 1])
@@ -132,7 +140,7 @@ impl<'s, I> Segment<'s, I> {
         ))
     }
 
-    /// Fills the provided buffer with the next n items, where n is the length of the buffer. This
+    /// Fills the provided buffer with the next n items, where n is the length of the buffer and
     /// then advances the [`Segment::current_offset`] by n.
     pub fn next_item_refs(&self, buf: &mut [&'s I]) -> Result<()> {
         let offset = self.current_offset();
@@ -148,26 +156,25 @@ impl<'s, I> Segment<'s, I> {
     #[inline]
     /// Generates a new [`Segment`] using the provided slice and initial offset.
     pub fn with_offset(data: &'s [I], initial_offset: usize) -> Self {
-        Self::inner_with_offset(data, initial_offset, Endidness::Unknown)
+        Self::inner_with_offset(data, initial_offset, Endidness::default())
     }
 
     #[inline]
     /// The initial offset of the [`Segment`]. For more information, see the **Offsets** section
-    /// of the [`Segment`] documentation.
+    /// of the [`Segment`] documentation (which still needs to be written...).
     pub fn initial_offset(&self) -> usize {
         self.initial_offset
     }
 
     #[inline]
-    /// The amount of data in the reader. If the reader's size changes (which none of the
-    /// implementations currently do), then this should return how much data was *initially* in the
-    /// reader.
+    /// The number of items initially provided to the [`Segment`]. Because a [`Segment`]'s data
+    /// can't be changed, this value will never change either.
     pub fn size(&self) -> usize {
         self.size
     }
 
     #[inline]
-    /// The current offset of the reader's cursor.
+    /// The current offset of the [`Segment`]'s cursor.
     pub fn current_offset(&self) -> usize {
         self.pos_to_offset(self.get_pos())
     }
@@ -195,16 +202,14 @@ impl<'s, I> Segment<'s, I> {
     }
 
     #[inline]
-    /// Gets a pointer to a slice of the byte at the [`Segment::current_offset`], as well as all
-    /// all bytes afterwards. This does not alter the [`Segment::current_offset`].
+    /// Gets a slice of all remaining data in the [`Segment`] and then advances the
+    /// [`Segment::current_offset`] to the end of the segment.
     pub fn get_remaining_as_slice(&self) -> Result<&[I]> {
         let pos = self.adj_pos(self.remaining() as i128)?;
         Ok(&self.data[pos..])
     }
 
     #[inline]
-    /// Gets a pointer to a slice of the byte at the [`Segment::current_offset`], as well as all
-    /// all bytes afterwards. This does not alter the [`Segment::current_offset`].
     pub fn get_remaining(&self) -> Result<Self> {
         let remaining = self.remaining();
         //TODO remaining may have change between here
@@ -218,28 +223,24 @@ impl<'s, I> Segment<'s, I> {
     }
 
     #[inline]
-    /// The lowest valid offset that can be requested. By default, this is the same as
-    /// [`Segment::initial_offset`].
+    /// The lowest valid offset that can be requested.
     pub fn lower_offset_limit(&self) -> usize {
         self.initial_offset
     }
 
     #[inline]
-    /// The highest valid offset that can be requested. By default, this is the reader's
-    /// [`Segment::size`] plus its [`Segment::initial_offset`].
+    /// The highest valid offset that can be requested.
     pub fn upper_offset_limit(&self) -> usize {
         self.initial_offset + self.size
     }
 
     #[inline]
-    /// Checks whether or not there is any data left, based off of the
-    /// [`Segment::current_offset`].
+    /// Checks whether or not there is any data left, relative to the [`Segment::current_offset`].
     pub fn is_empty(&self) -> bool {
         self.remaining() == 0
     }
 
     #[inline]
-    /// The amount of data left, based off of the [`Segment::current_offset`].
     fn calc_remaining(&self, pos: usize) -> usize {
         if pos > self.size {
             0
@@ -249,18 +250,19 @@ impl<'s, I> Segment<'s, I> {
     }
 
     #[inline]
-    /// The amount of data left, based off of the [`Segment::current_offset`].
+    /// The amount of data left, relative to the [`Segment::current_offset`].
     pub fn remaining(&self) -> usize {
         self.calc_remaining(self.get_pos())
     }
 
     #[inline]
+    /// Returns `true` if there is more data after the  [`Segment::current_offset`].
     pub fn has_more(&self) -> bool {
         self.remaining() > 0
     }
 
-    /// Fills the provided buffer with bytes, starting at the provided offset. This does not alter
-    /// the [`Segment::current_offset`].
+    /// Fills the provided buffer with references to items, starting at the provided offset. This
+    /// does not alter the [`Segment::current_offset`].
     pub fn item_refs_at<'a>(&'s self, offset: usize, buf: &mut [&'a I]) -> Result<()>
     where
         's: 'a,
@@ -271,26 +273,26 @@ impl<'s, I> Segment<'s, I> {
         }
         Ok(())
     }
+
     fn validate_pos(&self, pos: usize, size: usize) -> Result<()> {
-        if size > 0 && self.is_empty() {
+        if size > 0 && self.calc_remaining(pos) == 0 {
             Err(Error::NoMoreData)
         } else if pos > self.size {
-            Err(Error::OffsetTooLarge(pos))
+            Err(Error::OffsetTooLarge(self.pos_to_offset(pos)))
         } else if pos > self.size - size as usize {
-            Err(Error::NotEnoughData(size, self.remaining()))
+            Err(Error::NotEnoughData(size, self.size - pos))
         } else {
             Ok(())
         }
     }
 
-    /// A helper method that validates an offset (mostly used by reader implementations).
+    /// A helper method that validates an offset.
     ///
     /// If the offset is valid, then `Ok(())` will be returned. Otherwise, the appropriate
-    /// [`Error`] is returned (wrapped in `Err`, of course).
+    /// [`Error`] is returned.
     pub fn validate_offset(&self, offset: usize, size: usize) -> Result<()> {
-        if size > 0 && self.is_empty() {
-            Err(Error::NoMoreData)
-        } else if offset < self.lower_offset_limit() {
+        // We can't just pass the offset along, because it might be too small and cause an overflow.
+        if offset < self.lower_offset_limit() {
             Err(Error::OffsetTooSmall(offset))
         } else {
             self.validate_pos(self.to_pos(offset), size)
@@ -304,8 +306,8 @@ impl<'s, I> Segment<'s, I> {
         Ok(abs_offset - self.current_offset())
     }
 
-    /// Returns a subsequence (i.e. a `&[u8]`) of data of the requested size beginning at the
-    /// provided offset.
+    /// Returns a new [`Segment`] of the requested size, starting at the provied offset. This does
+    /// not alter the [`Segment::current_offset`].
     pub fn get_n(&self, offset: usize, num_items: usize) -> Result<Segment<I>> {
         self.validate_offset(offset, num_items)?;
         Ok(Segment::inner_with_offset(
@@ -315,8 +317,6 @@ impl<'s, I> Segment<'s, I> {
         ))
     }
 
-    /// Returns a subsequence (i.e. a `&[u8]`) of data of the requested size beginning at the
-    /// provided offset.
     pub fn get_n_as_slice(&self, offset: usize, num_items: usize) -> Result<&[I]> {
         self.validate_offset(offset, num_items)?;
         self.get_as_slice(offset, offset + num_items as usize)
@@ -337,6 +337,7 @@ impl<'s, I> Segment<'s, I> {
         ))
     }
 
+    /// Creates a new segment off all items after the provided offset (inclusive).
     pub fn all_after(&self, offset: usize) -> Result<Segment<I>> {
         self.validate_offset(offset, 0)?;
         Ok(Segment::inner_with_offset(
@@ -346,6 +347,7 @@ impl<'s, I> Segment<'s, I> {
         ))
     }
 
+    /// Creates a new segment off all items before the provided offset (exclusive).
     pub fn all_before(&self, offset: usize) -> Result<Segment<I>> {
         self.validate_offset(offset, 0)?;
         Ok(Segment::inner_with_offset(
@@ -360,6 +362,8 @@ impl<'s, I> Segment<'s, I>
 where
     I: Default + Copy,
 {
+    /// Gets the next n items as an array and then advances the [`Segment::current_offset`] by the
+    /// size of the array
     pub fn next_n_as_array<const N: usize>(&self) -> Result<[I; N]> {
         let pos = self.adj_pos(N as i128)?;
         let mut array = [I::default(); N];
@@ -372,7 +376,7 @@ impl<'s, I> Segment<'s, I>
 where
     I: PartialEq,
 {
-    /// Returns `true` if the next bytes are the same as the ones provided.
+    /// Returns `true` if the next items are the same as the ones in the provided slice.
     pub fn next_items_are(&self, prefix: &[I]) -> Result<bool> {
         self.validate_offset(self.current_offset(), prefix.len())?;
         for i in 0..prefix.len() {
@@ -385,26 +389,34 @@ where
 }
 
 macro_rules! make_num_method {
-    ($type:ty, $name:ident, $method:ident) => {
-        fn $name(&self) -> Result<$type> {
+    ($type:ty, $name:ident, $method:ident, $($doc:literal),+) => {
+        $(#[doc = $doc])+
+        pub fn $name(&self) -> Result<$type> {
             self.$method::<$type>()
         }
     };
 }
 macro_rules! make_num_method_with_offset {
-    ($type:ty, $name:ident, $method:ident) => {
-        fn $name(&self, offset: usize) -> Result<$type> {
+    ($type:ty, $name:ident, $method:ident, $($doc:literal),+) => {
+        $(#[doc = $doc])+
+        pub fn $name(&self, offset: usize) -> Result<$type> {
             self.$method::<$type>(offset)
         }
     };
 }
 
 impl<'s> Segment<'s, u8> {
+    /// Creates a new [`Segment`] using the provided endidness.
+    ///
+    /// Note: Only available if the [`Segment`]'s I is `u8`.
     #[inline]
     pub fn with_endidness(data: &'s [u8], endidness: Endidness) -> Self {
         Self::new_full(data, 0, 0, endidness)
     }
 
+    /// Creates a new [`Segment`] using the provided endidness and initial offset.
+    ///
+    /// Note: Only available if the [`Segment`]'s I is `u8`.
     #[inline]
     pub fn with_offset_and_endidness(
         data: &'s [u8],
@@ -415,93 +427,185 @@ impl<'s> Segment<'s, u8> {
     }
 
     #[inline]
-    /// The endidness of the reader.
+    /// The endidness of the [`Segment`].
+    ///
+    /// Note: Only available if the [`Segment`]'s I is `u8`.
     pub fn endidness(&self) -> Endidness {
         self.endidness
     }
 
     /// Fills the provided buffer with the next n bytes, where n is the length of the buffer. This
     /// then advances the [`Segment::current_offset`] by n.
+    ///
+    /// Note: Only available if the [`Segment`]'s I is `u8`.
     pub fn next_bytes(&self, buf: &mut [u8]) -> Result<()> {
+        //FIXME not async/threadsafe
         for i in 0..buf.len() {
             buf[i] = self.next_u8()?;
         }
         Ok(())
     }
 
-    pub fn int_at<I: Integer>(&self, offset: usize) -> Result<I> {
-        self.validate_offset(offset, I::WIDTH)?;
-        Ok(I::with_endidness(
-            &self[offset..offset + I::WIDTH],
+    /// Gets an integer of the provided type (e.g. `u8`, `i8`, `u16`, `i16`, etcetera) at the given
+    /// offset without altering the [`Segment::current_offset`]. In most cases, you should use
+    /// methods like [`Segment::u8_at`] instead.
+    ///
+    /// Note: Only available if the [`Segment`]'s I is `u8`.
+    pub fn int_at<N: Integer>(&self, offset: usize) -> Result<N> {
+        self.validate_offset(offset, N::WIDTH - 1)?;
+        Ok(N::with_endidness(
+            &self[offset..offset + N::WIDTH],
             self.endidness,
         ))
     }
 
-    /// Gets the `u8` at the provided offset without altering the [`Segment::current_offset`].
     #[inline]
+    /// See the documentation for [`Segment::int_at`].
+    ///
+    /// Note: Only available if the [`Segment`]'s I is `u8`.
     pub fn u8_at(&self, offset: usize) -> Result<u8> {
         self.item_at(offset)
     }
-    make_num_method_with_offset! {u16, u16_at, int_at}
-    make_num_method_with_offset! {u32, u32_at, int_at}
-    make_num_method_with_offset! {u64, u64_at, int_at}
-    make_num_method_with_offset! {u128, u128_at, int_at}
-    make_num_method_with_offset! {i8, i8_at, int_at}
-    make_num_method_with_offset! {i16, i16_at, int_at}
-    make_num_method_with_offset! {i32, i32_at, int_at}
-    make_num_method_with_offset! {i64, i64_at, int_at}
-    make_num_method_with_offset! {i128, i128_at, int_at}
+    make_num_method_with_offset! {u16, u16_at, int_at,
+    "See the documentation for [`Segment::int_at`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
 
+    make_num_method_with_offset! {u32, u32_at, int_at,
+    "See the documentation for [`Segment::int_at`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    make_num_method_with_offset! {u64, u64_at, int_at,
+    "See the documentation for [`Segment::int_at`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    make_num_method_with_offset! {u128, u128_at, int_at,
+    "See the documentation for [`Segment::int_at`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    make_num_method_with_offset! {i8, i8_at, int_at,
+    "See the documentation for [`Segment::int_at`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    make_num_method_with_offset! {i16, i16_at, int_at,
+    "See the documentation for [`Segment::int_at`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    make_num_method_with_offset! {i32, i32_at, int_at,
+    "See the documentation for [`Segment::int_at`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    make_num_method_with_offset! {i64, i64_at, int_at,
+    "See the documentation for [`Segment::int_at`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    make_num_method_with_offset! {i128, i128_at, int_at,
+    "See the documentation for [`Segment::int_at`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    /// Gets an integer of the provided type (e.g. `u8`, `i8`, `u16`, `i16`, etcetera) starting at
+    /// the at the [`Segment::current_offset`] without altering it. In most cases, you should use
+    /// methods like [`Segment::current_u8`] instead.
+    ///
+    /// Note: Only available if the [`Segment`]'s I is `u8`.
     #[inline]
-    pub fn current_int<I: Integer>(&self) -> Result<I> {
+    pub fn current_int<N: Integer>(&self) -> Result<N> {
         self.int_at(self.current_offset())
     }
 
-    make_num_method! {u8, current_u8, current_int}
-    make_num_method! {u16, current_u16, current_int}
-    make_num_method! {u32, current_u32, current_int}
-    make_num_method! {u64, current_u64, current_int}
-    make_num_method! {u128, current_u128, current_int}
-    make_num_method! {i8, current_i8, current_int}
-    make_num_method! {i16, current_i16, current_int}
-    make_num_method! {i32, current_i32, current_int}
-    make_num_method! {i64, current_i64, current_int}
-    make_num_method! {i128, current_i128, current_int}
+    make_num_method! {u8, current_u8, current_int,
+    "See the documentation for [`Segment::current_int`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
 
-    pub fn next_int<I: Integer>(&self) -> Result<I> {
-        let pos = self.adj_pos(I::WIDTH as i128)?;
+    make_num_method! {u16, current_u16, current_int,
+    "See the documentation for [`Segment::current_int`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    make_num_method! {u32, current_u32, current_int,
+    "See the documentation for [`Segment::current_int`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    make_num_method! {u64, current_u64, current_int,
+    "See the documentation for [`Segment::current_int`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    make_num_method! {u128, current_u128, current_int,
+    "See the documentation for [`Segment::current_int`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    make_num_method! {i8, current_i8, current_int,
+    "See the documentation for [`Segment::current_int`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    make_num_method! {i16, current_i16, current_int,
+    "See the documentation for [`Segment::current_int`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    make_num_method! {i32, current_i32, current_int,
+    "See the documentation for [`Segment::current_int`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    make_num_method! {i64, current_i64, current_int,
+    "See the documentation for [`Segment::current_int`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    make_num_method! {i128, current_i128, current_int,
+    "See the documentation for [`Segment::current_int`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    /// Gets an integer of the provided type (e.g. `u8`, `i8`, `u16`, `i16`, etcetera) starting at
+    /// the at the [`Segment::current_offset`] and then advances the [`Segment::current_offset`] by
+    /// n, where n is the number of bytes required to create the requested integer type. In most
+    /// cases, you should use methods like [`Segment::next_u8`] instead.
+    ///
+    /// Note: Only available if the [`Segment`]'s I is `u8`.
+    pub fn next_int<N: Integer>(&self) -> Result<N> {
+        let pos = self.adj_pos(N::WIDTH as i128)?;
         self.int_at(self.pos_to_offset(pos))
     }
 
-    make_num_method! {u16, next_u16, next_int}
-    make_num_method! {u32, next_u32, next_int}
-    make_num_method! {u64, next_u64, next_int}
-    make_num_method! {u128, next_u128, next_int}
-    make_num_method! {i8, next_i8, next_int}
-    make_num_method! {i16, next_i16, next_int}
-    make_num_method! {i32, next_i32, next_int}
-    make_num_method! {i64, next_i64, next_int}
-    make_num_method! {i128, next_i128, next_int}
-
-    /// Gets the current byte and then advances the cursor.
     #[inline]
+    /// See the documentation for [`Segment::next_int`].
+    ///
+    /// Note: Only available if the [`Segment`]'s I is `u8`.
     pub fn next_u8(&self) -> Result<u8> {
         self.next_item()
     }
-}
 
-impl<'s> TryFrom<&Segment<'s, u8>> for u8 {
-    type Error = Error;
-    fn try_from(segment: &Segment<'s, u8>) -> Result<Self> {
-        segment.next_u8()
-    }
-}
+    make_num_method! {u16, next_u16, next_int,
+    "See the documentation for [`Segment::next_int`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
 
-impl<'s> TryFrom<&Segment<'s, u8>> for i8 {
-    type Error = Error;
-    fn try_from(segment: &Segment<'s, u8>) -> Result<Self> {
-        segment.next_i8()
-    }
+    make_num_method! {u32, next_u32, next_int,
+    "See the documentation for [`Segment::next_int`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    make_num_method! {u64, next_u64, next_int,
+    "See the documentation for [`Segment::next_int`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    make_num_method! {u128, next_u128, next_int,
+    "See the documentation for [`Segment::next_int`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    make_num_method! {i8, next_i8, next_int,
+    "See the documentation for [`Segment::next_int`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    make_num_method! {i16, next_i16, next_int,
+    "See the documentation for [`Segment::next_int`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    make_num_method! {i32, next_i32, next_int,
+    "See the documentation for [`Segment::next_int`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    make_num_method! {i64, next_i64, next_int,
+    "See the documentation for [`Segment::next_int`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
+    make_num_method! {i128, next_i128, next_int,
+    "See the documentation for [`Segment::next_int`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
 }
 
 macro_rules! impl_try_from {
@@ -514,6 +618,18 @@ macro_rules! impl_try_from {
         }
     };
 }
+
+impl_try_from! { u8 }
+impl_try_from! { u16 }
+impl_try_from! { u32 }
+impl_try_from! { u64 }
+impl_try_from! { u128 }
+
+impl_try_from! { i8 }
+impl_try_from! { i16 }
+impl_try_from! { i32 }
+impl_try_from! { i64 }
+impl_try_from! { i128 }
 
 impl<'s, I: Clone> Segment<'s, I> {
     /// Fills the provided buffer with bytes, starting at the provided offset. This does not alter
@@ -665,13 +781,13 @@ impl<'s, I> Clone for Segment<'s, I> {
 mod sync {
     use super::Segment;
     use crate::error::Error;
-    use std::{
+    use core::{
         cmp::min,
-        io,
         pin::Pin,
         sync::atomic::Ordering,
         task::{Context, Poll},
     };
+    use std::io;
     use tokio::io::{AsyncBufRead, AsyncRead, AsyncSeek, ReadBuf};
 
     impl<'r> AsyncRead for Segment<'r, u8> {

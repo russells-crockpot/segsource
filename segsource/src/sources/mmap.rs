@@ -13,6 +13,12 @@ use tokio::task::spawn_blocking;
 #[cfg(feature = "async")]
 use async_trait::async_trait;
 
+/// A [`U8Source`] whose data is owned by a memory mapped file. This source can only use `u8`s as
+/// its item.
+///
+/// An important note: The mapped file is locked first via an advisory lock. This is to prevent
+/// changes to the file while it is mapped. However, this is just an **advisory** lock, and other
+/// processes may choose to ignore it. So, it's best not to alter it while it's mapped.
 pub struct MappedFileSource {
     initial_offset: usize,
     data: Mmap,
@@ -59,7 +65,7 @@ impl Source for MappedFileSource {
 
     #[inline]
     fn from_vec_with_offset(items: Vec<Self::Item>, initial_offset: usize) -> Result<Self> {
-        Self::from_u8_slice_with_offset(&items, initial_offset, Endidness::Unknown)
+        Self::from_u8_slice_with_offset(&items, initial_offset, Endidness::default())
     }
 
     fn segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
@@ -145,10 +151,10 @@ impl U8Source for MappedFileSource {
         self.endidness = endidness
     }
 
-    #[inline]
-    fn u8_segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
-        Source::segment(self, start, end)
-    }
+    //#[inline]
+    //fn u8_segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
+    //Source::segment(self, start, end)
+    //}
 }
 
 impl Drop for MappedFileSource {

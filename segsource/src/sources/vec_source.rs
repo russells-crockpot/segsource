@@ -1,5 +1,5 @@
 #[cfg(feature = "async")]
-use crate::util::async_u8_vec_from_file;
+use crate::sync::async_u8_vec_from_file;
 use crate::{Endidness, Result, Segment, Source, U8Source};
 #[cfg(feature = "bytes")]
 use bytes::Bytes;
@@ -8,6 +8,7 @@ use std::{fs, io::Read as _, path::Path};
 #[cfg(feature = "async")]
 use async_trait::async_trait;
 
+/// A [`Source`] that uses a `Vec` to store its data.
 pub struct VecSource<I: Sync + Send> {
     initial_offset: usize,
     data: Vec<I>,
@@ -43,7 +44,7 @@ impl<I: Sync + Send> Source for VecSource<I> {
         Ok(Self {
             initial_offset,
             data: items,
-            endidness: Endidness::Unknown,
+            endidness: Endidness::default(),
         })
     }
 
@@ -132,14 +133,14 @@ impl U8Source for VecSource<u8> {
         Ok(Self::new(Vec::from(items), initial_offset, endidness))
     }
 
-    fn u8_segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
-        self.validate_offset(start)?;
-        self.validate_offset(end)?;
-        Ok(Segment::with_offset_and_endidness(
-            &self.data
-                [(start - self.initial_offset) as usize..(end - self.initial_offset) as usize],
-            start,
-            self.endidness,
-        ))
-    }
+    //fn u8_segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
+    //self.validate_offset(start)?;
+    //self.validate_offset(end)?;
+    //Ok(Segment::with_offset_and_endidness(
+    //&self.data
+    //[(start - self.initial_offset) as usize..(end - self.initial_offset) as usize],
+    //start,
+    //self.endidness,
+    //))
+    //}
 }

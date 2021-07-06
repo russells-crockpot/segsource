@@ -1,6 +1,8 @@
+//! Markers for segsource.
 use crate::Endidness;
-use std::convert::TryInto;
+use core::convert::TryInto;
 
+/// An extension trait for integers.
 pub trait Integer: Sized {
     const WIDTH: usize;
     fn from_be(bytes: &[u8]) -> Self;
@@ -10,7 +12,6 @@ pub trait Integer: Sized {
         match endidness {
             Endidness::Big => Self::from_be(bytes),
             Endidness::Little => Self::from_le(bytes),
-            Endidness::Unknown => Self::from_ne(bytes),
         }
     }
 }

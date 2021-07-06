@@ -1,10 +1,9 @@
 [package]
 name = "segsource"
 version = "0.1.0"
-authors = [ "Brendan McGloin <stmonkeydoom@gmail.com>",]
 edition = "2018"
 license = "MIT"
-description = "A helper library to make reading data more pleasant."
+description = "A library to make reading data of any type quicker and easier."
 homepage = "https://github.com/russells-crockpot/segsource"
 repository = "https://github.com/russells-crockpot/segsource"
 readme = "../README.md"
@@ -15,14 +14,12 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-bytes = { version = "1.0", optional = true}
-thiserror = "1.0"
-tokio = { version = "1.7", optional = true, features = ["fs", "io-util", "rt"]}
-bitvec = { version = "0.19", optional = true }
-async-trait = { version = "0.1.50", optional = true }
-pin-project-lite = { version = "0.2.6", optional = true }
-futures-core = { version = "0.3.15", optional = true }
-scroll = { version = "0.10.2", optional = true }
+bytes = { version = "1", optional = true}
+thiserror = "1"
+tokio = { version = "1", optional = true, features = ["fs", "io-util", "rt"]}
+async-trait = { version = "0.1", optional = true }
+pin-project-lite = { version = "0.2", optional = true }
+futures-core = { version = "0.3", optional = true }
 
 [dependencies.fs3]
 version = "0.5"
@@ -37,13 +34,12 @@ path = "../derive"
 version = "0.1.0"
 optional = true
 
-#[dependencies.here]
-#path = "../../here"
-#version = "1.0.0"
-#features = ["log"]
-
 [features]
 default = ["derive"]
 derive = ["segsource-derive"]
 memmap = [ "fs3", "memmap2",]
 async = ["tokio", "async-trait", "pin-project-lite", "futures-core"]
+
+[dev-dependencies]
+color-backtrace = "0.5"
+ctor = "0.1"

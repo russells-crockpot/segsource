@@ -1,26 +1,68 @@
+#![allow(dead_code, unused_variables)]
 use crate::util::{create_new_lifetimes, parse_parenthesized};
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{
-    punctuated::Punctuated, DeriveInput, Fields, FieldsNamed, FieldsUnnamed, Ident, Token, Type,
+    punctuated::Punctuated, Data, DataEnum, DataStruct, DeriveInput, Fields, FieldsNamed,
+    FieldsUnnamed, Ident, Token, Type,
 };
-mod attr;
-use attr::FromSegField;
+mod field_attrs;
+use field_attrs::FromSegField;
+mod variant_attrs;
 
-pub(crate) fn base_from_segment(input: DeriveInput, generating_try_from: bool) -> TokenStream {
+fn generate_fields_body(
+    ident: &Ident,
+    fields: Fields,
+    segment_type: &TokenStream,
+    generating_try_from: bool,
+) -> TokenStream {
+    let (tuple_like, fields_iter) = match fields {
+        Fields::Named(FieldsNamed { named, .. }) => (false, named.into_iter()),
+        Fields::Unnamed(FieldsUnnamed { unnamed, .. }) => (true, unnamed.into_iter()),
+        Fields::Unit => panic!("Struct or variant {} has no fields!", ident),
+    };
+    let fields: Punctuated<FromSegField, Token![;]> = fields_iter
+        .map(|f| (f, generating_try_from, segment_type.clone()))
+        .enumerate()
+        .map(FromSegField::from)
+        .collect();
+    let field_names: Punctuated<Ident, Token![,]> =
+        fields.iter().map(FromSegField::tmp_var).collect();
+    let create_self_stmt = if tuple_like && generating_try_from {
+        quote! {Ok(Self(#field_names))}
+    } else if tuple_like {
+        quote! {Self(#field_names)}
+    } else if generating_try_from {
+        quote! {Ok(Self{#field_names})}
+    } else {
+        quote! {Self{#field_names}}
+    };
+    quote! {
+        #fields
+        #create_self_stmt
+    }
+}
+
+fn generate_body(
+    ident: &Ident,
+    data: Data,
+    segment_type: &TokenStream,
+    generating_try_from: bool,
+) -> TokenStream {
+    match data {
+        Data::Struct(DataStruct { fields, .. }) => {
+            generate_fields_body(ident, fields, segment_type, generating_try_from)
+        }
+        Data::Enum(DataEnum { variants, .. }) => todo!(),
+        _ => unimplemented!(),
+    }
+}
+
+pub fn base_from_segment(input: DeriveInput, generating_try_from: bool) -> TokenStream {
     let item_type_attr_name = if generating_try_from {
         "try_from_item_type"
     } else {
         "from_item_type"
-    };
-    let (tuple_like, fields_iter) = if let syn::Data::Struct(body) = input.data {
-        match body.fields {
-            Fields::Named(FieldsNamed { named, .. }) => (false, named.into_iter()),
-            Fields::Unnamed(FieldsUnnamed { unnamed, .. }) => (true, unnamed.into_iter()),
-            Fields::Unit => panic!("Struct {} has no fields!", input.ident),
-        }
-    } else {
-        panic!("Items can only be derived from a struct!");
     };
     let mut maybe_item_type = None;
     let mut maybe_error_stmt = None;
@@ -42,13 +84,6 @@ pub(crate) fn base_from_segment(input: DeriveInput, generating_try_from: bool) -
     let ([lifetime], generics) = create_new_lifetimes(&input.generics);
     let (impl_g, _, maybe_where) = generics.split_for_impl();
     let segment_type = quote! {&::segsource::Segment<#lifetime, #item_type>};
-    let fields: Punctuated<FromSegField, Token![;]> = fields_iter
-        .map(|f| (f, generating_try_from, segment_type.clone()))
-        .enumerate()
-        .map(FromSegField::from)
-        .collect();
-    let field_names: Punctuated<Ident, Token![,]> =
-        fields.iter().map(FromSegField::tmp_var).collect();
     let (trait_name, method_sig) = if generating_try_from {
         (
             quote! {::std::convert::TryFrom},
@@ -63,21 +98,12 @@ pub(crate) fn base_from_segment(input: DeriveInput, generating_try_from: bool) -
             quote! {from(segment: #segment_type) -> Self},
         )
     };
-    let create_self_stmt = if tuple_like && generating_try_from {
-        quote! {Ok(Self(#field_names))}
-    } else if tuple_like {
-        quote! {Self(#field_names)}
-    } else if generating_try_from {
-        quote! {Ok(Self{#field_names})}
-    } else {
-        quote! {Self{#field_names}}
-    };
+    let body = generate_body(&name, input.data, &segment_type, generating_try_from);
     quote! {
         impl #impl_g #trait_name<#segment_type> for #name #type_g #maybe_where {
             #maybe_error_stmt
             fn #method_sig {
-                #fields
-                #create_self_stmt
+                #body
             }
         }
     }
