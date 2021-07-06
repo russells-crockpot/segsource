@@ -10,6 +10,7 @@ use core::{
     ops::{self, Bound, Index, RangeBounds as _},
     sync::atomic::{AtomicUsize, Ordering},
 };
+#[cfg(feature = "std")]
 use std::io;
 
 /// A segment of a [`crate::Source`].
@@ -278,9 +279,14 @@ impl<'s, I> Segment<'s, I> {
         if size > 0 && self.calc_remaining(pos) == 0 {
             Err(Error::NoMoreData)
         } else if pos > self.size {
-            Err(Error::OffsetTooLarge(self.pos_to_offset(pos)))
+            Err(Error::OffsetTooLarge {
+                offset: self.pos_to_offset(pos),
+            })
         } else if pos > self.size - size as usize {
-            Err(Error::NotEnoughData(size, self.size - pos))
+            Err(Error::NotEnoughData {
+                requested: size,
+                left: self.size - pos,
+            })
         } else {
             Ok(())
         }
@@ -293,7 +299,7 @@ impl<'s, I> Segment<'s, I> {
     pub fn validate_offset(&self, offset: usize, size: usize) -> Result<()> {
         // We can't just pass the offset along, because it might be too small and cause an overflow.
         if offset < self.lower_offset_limit() {
-            Err(Error::OffsetTooSmall(offset))
+            Err(Error::OffsetTooSmall { offset })
         } else {
             self.validate_pos(self.to_pos(offset), size)
         }
@@ -715,6 +721,7 @@ impl<'s, I> Borrow<[I]> for Segment<'s, I> {
     }
 }
 
+#[cfg(feature = "std")]
 impl<'s> io::Read for Segment<'s, u8> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.remaining() > buf.len() {
@@ -730,6 +737,7 @@ impl<'s> io::Read for Segment<'s, u8> {
     }
 }
 
+#[cfg(feature = "std")]
 impl<'s> io::Seek for Segment<'s, u8> {
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
         match pos {
@@ -745,6 +753,7 @@ impl<'s> io::Seek for Segment<'s, u8> {
     }
 }
 
+#[cfg(feature = "std")]
 impl<'s> io::BufRead for Segment<'s, u8> {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
         let pos = self.get_pos();
@@ -828,7 +837,7 @@ mod sync {
             };
             match result {
                 Ok(()) => Ok(()),
-                Err(Error::IoError(e)) => Err(e),
+                Err(Error::IoError { error }) => Err(error),
                 Err(e) => panic!("{}", e),
             }
         }

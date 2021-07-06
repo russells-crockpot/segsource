@@ -3,6 +3,9 @@ use crate::{
     segment::Segment,
     Endidness,
 };
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+#[cfg(feature = "std")]
 use std::path::Path;
 
 mod vec_source;
@@ -11,12 +14,12 @@ pub use vec_source::VecSource;
 //mod segment_like;
 //pub use segment_like::*;
 
-#[cfg(feature = "bytes")]
+#[cfg(feature = "with_bytes")]
 use bytes::Bytes;
-#[cfg(feature = "bytes")]
+#[cfg(feature = "with_bytes")]
 mod bytes_source;
 
-#[cfg(feature = "bytes")]
+#[cfg(feature = "with_bytes")]
 pub use bytes_source::BytesSource;
 
 #[cfg(feature = "memmap")]
@@ -56,9 +59,9 @@ pub trait Source: Sized + Sync + Send {
     /// returned. Otherwise, the appropriate error will be returned.
     fn validate_offset(&self, offset: usize) -> Result<()> {
         if offset < self.lower_offset_limit() {
-            Err(Error::OffsetTooSmall(offset))
+            Err(Error::OffsetTooSmall { offset })
         } else if offset > self.upper_offset_limit() {
-            Err(Error::OffsetTooLarge(offset))
+            Err(Error::OffsetTooLarge { offset })
         } else {
             Ok(())
         }
@@ -157,12 +160,14 @@ pub trait U8Source: Source<Item = u8> {
         Self::from_u8_slice_with_offset(&items, initial_offset, endidness)
     }
 
+    #[cfg(feature = "std")]
     /// Creates a new source using the the provided file and [`Endidness`].
     #[inline]
     fn from_file<P: AsRef<Path>>(path: P, endidness: Endidness) -> Result<Self> {
         Self::from_file_with_offset(path, 0, endidness)
     }
 
+    #[cfg(feature = "std")]
     /// Creates a new source using the the provided file, [`Endidness`], and offset.
     fn from_file_with_offset<P: AsRef<Path>>(
         path: P,
@@ -190,14 +195,14 @@ pub trait U8Source: Source<Item = u8> {
     where
         P: AsRef<Path> + Sync + Send;
 
-    #[cfg(feature = "bytes")]
+    #[cfg(feature = "with_bytes")]
     /// Creates a new source using the the provided Bytes and [`Endidness`].
     #[inline]
     fn from_bytes(bytes: Bytes, endidness: Endidness) -> Result<Self> {
         Self::from_bytes_with_offset(bytes, 0, endidness)
     }
 
-    #[cfg(feature = "bytes")]
+    #[cfg(feature = "with_bytes")]
     /// Creates a new source using the the provided Bytes, [`Endidness`], and offset.
     fn from_bytes_with_offset(
         bytes: Bytes,

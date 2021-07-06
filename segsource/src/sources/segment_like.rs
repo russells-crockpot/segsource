@@ -1,6 +1,8 @@
 /// WIP which I'm not even sure can be done in Rust. Or the very least, done *well*...
 use crate::{Result, Segment, Source};
-use std::{marker::Unpin, mem::ManuallyDrop, ops::Deref, pin::Pin, ptr, sync::Arc};
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+use core::{marker::Unpin, mem::ManuallyDrop, ops::Deref, pin::Pin, ptr, sync::Arc};
 
 struct PinnableSource<S: Source + Unpin>(S);
 impl<S: Source + Unpin> Deref for PinnableSource<S> {

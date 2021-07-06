@@ -1,8 +1,11 @@
 #[cfg(feature = "async")]
 use crate::sync::async_u8_vec_from_file;
 use crate::{Endidness, Result, Segment, Source, U8Source};
-#[cfg(feature = "bytes")]
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+#[cfg(feature = "with_bytes")]
 use bytes::Bytes;
+#[cfg(feature = "std")]
 use std::{fs, io::Read as _, path::Path};
 
 #[cfg(feature = "async")]
@@ -87,6 +90,7 @@ impl U8Source for VecSource<u8> {
         ))
     }
 
+    #[cfg(feature = "std")]
     #[inline]
     fn from_file_with_offset<P: AsRef<Path>>(
         path: P,
@@ -103,7 +107,7 @@ impl U8Source for VecSource<u8> {
     }
 
     #[inline]
-    #[cfg(feature = "bytes")]
+    #[cfg(feature = "with_bytes")]
     fn from_bytes_with_offset(
         bytes: Bytes,
         initial_offset: usize,

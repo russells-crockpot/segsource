@@ -1,4 +1,4 @@
-//#![cfg_attr(all(not(feature = "std"), not(test)), no_std)]
+#![cfg_attr(all(not(feature = "std"), not(test)), no_std)]
 //! Segsource is a crate designed to assist in reading data. Although is specifically designed with
 //! binary (`u8`) data, it is not limited to this.
 //!
@@ -17,11 +17,12 @@
 //! The following features are available for segsource:
 //!
 //! 1. `async` which adds support for various `async` operations using `tokio`.
-//! 2. `bytes` which adds support for using the `bytes` crate.
-//! 3. `derive` which includes several macros for creating structs from [`Segment`]s.
-//! 4. `mmap` which adds support for memory mapped files.
+//! 2. `derive` which includes several macros for creating structs from [`Segment`]s.
+//! 3. `mmap` which adds support for memory mapped files.
+//! 4. `std` which adds support for file and I/O operations.
+//! 5. `with_bytes` which adds support for using the `bytes` crate.
 //!
-//! Of these, only `derive` is enabled by default.
+//! Of these, only `derive` and `std` are enabled by default.
 //!
 //! ## Why segsource?
 //!
@@ -83,6 +84,9 @@
 //! # let segment = source.all().unwrap();
 //! assert!(matches!(segment.u8_at(99), Err(Error::OffsetTooSmall(99))));
 //! ```
+
+#[cfg(not(feature = "std"))]
+extern crate alloc;
 
 use core::fmt;
 
