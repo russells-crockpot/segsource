@@ -11,6 +11,8 @@ use pmhelp::{
 };
 use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
+#[cfg(feature = "syn-full")]
+use syn::ExprType;
 use syn::{
     parse::{Parse, ParseStream, Result},
     punctuated::Punctuated,
@@ -35,6 +37,104 @@ mod kw {
     syn::custom_keyword!(size);
     syn::custom_keyword!(default);
     syn::custom_keyword!(no_wrap);
+    syn::custom_keyword!(also_pass);
+}
+
+pub struct AlsoPassEntry {
+    expr: Box<Expr>,
+    ty: Box<Type>,
+}
+
+#[cfg(feature = "syn-full")]
+impl Parse for AlsoPassEntry {
+    fn parse(stream: ParseStream) -> Result<Self> {
+        let expr_type = stream.parse::<ExprType>()?;
+        Ok(Self {
+            expr: expr_type.expr,
+            ty: expr_type.ty,
+        })
+    }
+}
+
+#[cfg(not(feature = "syn-full"))]
+impl Parse for AlsoPassEntry {
+    fn parse(stream: ParseStream) -> Result<Self> {
+        Ok(Self {
+            expr: stream.parse()?,
+            ty: {
+                stream.parse::<Token![:]>()?;
+                stream.parse()?
+            },
+        })
+    }
+}
+
+pub struct AlsoPass {
+    segment_type: Option<TokenStream>,
+    additional_types: Option<Punctuated<AlsoPassEntry, Token![,]>>,
+}
+
+impl AlsoPass {
+    pub fn get_default_args() -> TokenStream {
+        quote! {segment}
+    }
+
+    pub fn set_segment_type(&mut self, segment_type: TokenStream) {
+        if self.segment_type.is_some() {
+            panic!("Attempted to set segment_type twice!")
+        }
+        self.segment_type = Some(segment_type);
+    }
+
+    pub fn get_conv_type(&self) -> TokenStream {
+        let segment_type = self
+            .segment_type
+            .clone()
+            .expect("segment_type has not been set!");
+        if let Some(also_pass) = self.additional_types.as_ref() {
+            if also_pass.is_empty() {
+                segment_type
+            } else {
+                let types: Vec<&Box<Type>> = also_pass.iter().map(|an| &an.ty).collect();
+                quote! {(#(#types,)* #segment_type)}
+            }
+        } else {
+            segment_type
+        }
+    }
+
+    pub fn get_args(&self) -> TokenStream {
+        let default = Self::get_default_args();
+        if let Some(also_pass) = self.additional_types.as_ref() {
+            if also_pass.is_empty() {
+                default
+            } else {
+                let exprs: Vec<&Box<Expr>> = also_pass.iter().map(|an| &an.expr).collect();
+                quote! {(#(#exprs,)* #default)}
+            }
+        } else {
+            default
+        }
+    }
+}
+
+impl Default for AlsoPass {
+    fn default() -> Self {
+        Self {
+            segment_type: None,
+            additional_types: None,
+        }
+    }
+}
+
+impl Parse for AlsoPass {
+    #[inline]
+    fn parse(stream: ParseStream) -> Result<Self> {
+        Ok(Self {
+            segment_type: None,
+            additional_types: Some(comma_separated_ps(stream)?),
+        })
+    }
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -178,7 +278,7 @@ enum FromSegEntry {
     If(Expr),
     ErrorIf(Box<ErrorIf>),
     NoWrap,
-    AlsoPass(Punctuated<Expr, Token![,]>),
+    AlsoPass(AlsoPass),
     MoveTo(Expr),
     MoveBy(Expr),
 }
@@ -194,7 +294,7 @@ impl FromSegEntry {
             Self::Parser(value) => from_seg.parser = Some(value),
             Self::If(value) => from_seg.if_ = Some(value),
             Self::ErrorIf(value) => from_seg.error_if = Some(value),
-            Self::AlsoPass(value) => from_seg.also_pass = Some(value),
+            Self::AlsoPass(value) => from_seg.also_pass = value,
             Self::MoveTo(value) => from_seg.move_to = Some(value),
             Self::MoveBy(value) => from_seg.move_by = Some(value),
             Self::MapEach(value) => {
@@ -217,6 +317,8 @@ impl Parse for FromSegEntry {
             Ok(Self::NoWrap)
         } else if stream.peek_and_consume(kw::parser) {
             Ok(Self::Parser(from_parens!(stream).parse()?))
+        } else if stream.peek_and_consume(kw::also_pass) {
+            Ok(Self::AlsoPass(from_parens!(stream).parse()?))
         } else if stream.peek_and_consume(kw::error_if) {
             Ok(Self::ErrorIf(stream.parse()?))
         } else if stream.peek_and_consume(Token![if]) {
@@ -275,7 +377,7 @@ pub struct FromSegField {
     error_if: Option<Box<ErrorIf>>,
     default_value: Option<Expr>,
     no_wrap: bool,
-    also_pass: Option<Punctuated<Expr, Token![,]>>,
+    also_pass: AlsoPass,
     move_to: Option<Expr>,
     move_by: Option<Expr>,
 }
@@ -319,7 +421,7 @@ impl FromSegField {
             error_if: None,
             default_value: None,
             no_wrap: false,
-            also_pass: None,
+            also_pass: Default::default(),
             move_to: None,
             move_by: None,
         }
@@ -347,7 +449,7 @@ impl FromSegField {
                     .collect()
             }
         } else {
-            self.get_simple_assign_val(quote! {segment})
+            self.get_simple_assign_val(self.also_pass.get_args())
         };
         if !self.no_wrap && self.ty.is_option() {
             base = quote! {Some(#base)};
@@ -369,25 +471,25 @@ impl FromSegField {
     /// Gets the value to be assigned, ignoring repeated values
     fn get_simple_assign_val(&self, value: TokenStream) -> TokenStream {
         let suffix = self.get_try_suffix();
-        let segment_type = &self.also_needs.get_segment_type();
+        let conv_type = &self.also_pass.get_conv_type();
         if let Some(parser) = &self.parser {
             quote! {#parser#suffix}
         } else if let Some(FromOption::Default) = &self.from {
             let ty = self.base_type.as_ref().unwrap_or(&self.ty);
-            quote! {<#ty as ::core::convert::From<#segment_type>>::from(#value)}
+            quote! {<#ty as ::core::convert::From<#conv_type>>::from(#value)}
         } else if let Some(FromOption::Type(ty)) = &self.from {
-            quote! {<#ty as ::core::convert::From<#segment_type>>::from(#value)}
+            quote! {<#ty as ::core::convert::From<#conv_type>>::from(#value)}
         } else if let Some(FromOption::Default) = &self.try_from {
             let ty = self.base_type.as_ref().unwrap_or(&self.ty);
-            quote! {<#ty as ::core::convert::TryFrom<#segment_type>>::try_from(#value)#suffix}
+            quote! {<#ty as ::core::convert::TryFrom<#conv_type>>::try_from(#value)#suffix}
         } else if let Some(FromOption::Type(ty)) = &self.try_from {
-            quote! {<#ty as ::core::convert::TryFrom<#segment_type>>::try_from(#value)#suffix}
+            quote! {<#ty as ::core::convert::TryFrom<#conv_type>>::try_from(#value)#suffix}
         } else if self.generating_try_from {
             let ty = self.base_type.as_ref().unwrap_or(&self.ty);
-            quote! {<#ty as ::core::convert::TryFrom<#segment_type>>::try_from(#value)#suffix}
+            quote! {<#ty as ::core::convert::TryFrom<#conv_type>>::try_from(#value)#suffix}
         } else {
             let ty = self.base_type.as_ref().unwrap_or(&self.ty);
-            quote! {<#ty as ::core::convert::From<#segment_type>>::from(#value)}
+            quote! {<#ty as ::core::convert::From<#conv_type>>::from(#value)}
         }
     }
 
@@ -481,6 +583,8 @@ impl From<(usize, (Field, bool, Rc<AlsoNeeds>))> for FromSegField {
         if me.move_to.is_some() && me.move_by.is_some() {
             panic!("move_to or move_by can be specified, not both.")
         }
+        me.also_pass
+            .set_segment_type(me.also_needs.get_segment_type());
         me
     }
 }

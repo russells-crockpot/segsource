@@ -13,7 +13,10 @@ proc-macro = true
 [dependencies]
 proc-macro2 = "1"
 quote = "1"
-syn = "1"
+
+[dependencies.syn]
+version = "1"
+#features = ["extra-traits"]
 
 [dependencies.here]
 path = "../../here"
@@ -22,3 +25,6 @@ version = "1"
 [dependencies.pmhelp]
 path = "../../pmhelp/pmhelp"
 version = "0.0.1"
+
+[features]
+syn-full = []
