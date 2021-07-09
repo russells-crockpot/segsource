@@ -1,8 +1,8 @@
 #![allow(dead_code, unused_variables, unused_imports, unused_macros)]
 use crate::util::{get_attr_value, parse_parenthesized2};
+use core::iter::{FromIterator, IntoIterator};
 use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
-use std::iter::{FromIterator, IntoIterator};
 use syn::{
     parenthesized,
     parse::{Parse, ParseStream, Result as ParseResult},

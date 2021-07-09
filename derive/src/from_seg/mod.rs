@@ -1,19 +1,20 @@
-#![allow(dead_code, unused_variables)]
-use crate::util::{create_new_lifetimes, parse_parenthesized};
+use alloc::rc::Rc;
+use pmhelp::{parse::token_stream::parenthesized, util::create_new_lifetimes};
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{
-    punctuated::Punctuated, Data, DataEnum, DataStruct, DeriveInput, Fields, FieldsNamed,
-    FieldsUnnamed, Ident, Token, Type,
+    parse::{Parser as _, Result},
+    punctuated::Punctuated,
+    Data, DataEnum, DataStruct, DeriveInput, Fields, FieldsNamed, FieldsUnnamed, Ident, Token,
+    Type,
 };
-mod field_attrs;
-use field_attrs::FromSegField;
-mod variant_attrs;
+mod attrs;
+use attrs::{AlsoNeeds, FromSegField, FromSegInfo};
 
 fn generate_fields_body(
     ident: &Ident,
     fields: Fields,
-    segment_type: &TokenStream,
+    also_needs: Rc<AlsoNeeds>,
     generating_try_from: bool,
 ) -> TokenStream {
     let (tuple_like, fields_iter) = match fields {
@@ -22,7 +23,7 @@ fn generate_fields_body(
         Fields::Unit => panic!("Struct or variant {} has no fields!", ident),
     };
     let fields: Punctuated<FromSegField, Token![;]> = fields_iter
-        .map(|f| (f, generating_try_from, segment_type.clone()))
+        .map(|f| (f, generating_try_from, Rc::clone(&also_needs)))
         .enumerate()
         .map(FromSegField::from)
         .collect();
@@ -46,73 +47,75 @@ fn generate_fields_body(
 fn generate_body(
     ident: &Ident,
     data: Data,
-    segment_type: &TokenStream,
+    also_needs: Rc<AlsoNeeds>,
     generating_try_from: bool,
 ) -> TokenStream {
     match data {
         Data::Struct(DataStruct { fields, .. }) => {
-            generate_fields_body(ident, fields, segment_type, generating_try_from)
+            generate_fields_body(ident, fields, also_needs, generating_try_from)
         }
         Data::Enum(DataEnum { variants, .. }) => todo!(),
         _ => unimplemented!(),
     }
 }
 
-pub fn base_from_segment(input: DeriveInput, generating_try_from: bool) -> TokenStream {
-    let item_type_attr_name = if generating_try_from {
-        "try_from_item_type"
-    } else {
-        "from_item_type"
-    };
-    let mut maybe_item_type = None;
-    let mut maybe_error_stmt = None;
+pub fn base_from_segment(input: DeriveInput, generating_try_from: bool) -> Result<TokenStream> {
+    let mut maybe_info = None;
     for attr in input.attrs {
-        if attr.path.is_ident(item_type_attr_name) {
-            maybe_item_type = Some(parse_parenthesized::<Type>(attr.tokens).unwrap());
-        } else if attr.path.is_ident("try_from_error") {
-            let error_type = Some(parse_parenthesized::<Type>(attr.tokens).unwrap());
-            maybe_error_stmt = Some(quote! { type Error = #error_type; });
+        if attr.path.is_ident("from_seg") {
+            maybe_info = Some(syn::parse2(parenthesized::<TokenStream>(attr.tokens)?)?);
+            break;
         }
     }
-    let item_type =
-        maybe_item_type.unwrap_or_else(|| panic!("No {} attribute found!", item_type_attr_name));
-    if generating_try_from && maybe_error_stmt.is_none() {
-        panic!("No try_from_error attribute found!")
-    }
-    let name = input.ident;
-    let (_, type_g, _) = input.generics.split_for_impl();
     let ([lifetime], generics) = create_new_lifetimes(&input.generics);
     let (impl_g, _, maybe_where) = generics.split_for_impl();
-    let segment_type = quote! {&::segsource::Segment<#lifetime, #item_type>};
+    let FromSegInfo {
+        item_type,
+        error_type,
+        mut also_needs,
+    } = maybe_info.unwrap_or_default();
+    if generating_try_from && error_type.is_none() {
+        panic!("No error type specified!");
+    }
+    also_needs.set_segment_generics(quote! {#lifetime, #item_type});
+    let also_needs = Rc::new(also_needs);
+    let error_stmt = error_type
+        .map(|etype| quote! {type Error = #etype;})
+        .unwrap_or_default();
+    let name = input.ident;
+    let (_, type_g, _) = input.generics.split_for_impl();
+    let segment_type = also_needs.get_type();
+    let method_args = also_needs.get_args();
     let (trait_name, method_sig) = if generating_try_from {
         (
-            quote! {::std::convert::TryFrom},
+            quote! {::core::convert::TryFrom},
             quote! {
-                try_from(segment: #segment_type)
-                    -> ::std::result::Result<Self, Self::Error>
+                try_from(#method_args: #segment_type)
+                    -> ::core::result::Result<Self, Self::Error>
             },
         )
     } else {
         (
-            quote! {::std::convert::From},
+            quote! {::core::convert::From},
             quote! {from(segment: #segment_type) -> Self},
         )
     };
-    let body = generate_body(&name, input.data, &segment_type, generating_try_from);
-    quote! {
+    let body = generate_body(&name, input.data, also_needs, generating_try_from);
+    Ok(quote! {
         impl #impl_g #trait_name<#segment_type> for #name #type_g #maybe_where {
-            #maybe_error_stmt
+            #error_stmt
+            #[allow(unused_parens)]
             fn #method_sig {
                 #body
             }
         }
-    }
+    })
 }
 
 pub(crate) fn derive_from_segment(input: DeriveInput) -> TokenStream {
-    base_from_segment(input, false)
+    base_from_segment(input, false).unwrap()
 }
 
 pub(crate) fn derive_try_from_segment(input: DeriveInput) -> TokenStream {
-    base_from_segment(input, true)
+    base_from_segment(input, true).unwrap()
 }

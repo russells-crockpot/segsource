@@ -99,7 +99,8 @@ pub use error::*;
 pub(crate) mod segment;
 pub use segment::*;
 
-mod marker;
+#[doc(hidden)]
+pub mod marker;
 
 #[cfg(feature = "derive")]
 #[doc(inline)]
@@ -114,7 +115,7 @@ mod testing;
 
 /// The "endidness" (i.e. big endian or little endian) of binary data. Defaults to the native
 /// endidness.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Endidness {
     Big,
     Little,
