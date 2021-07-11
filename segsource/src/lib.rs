@@ -1,4 +1,5 @@
 #![cfg_attr(all(not(feature = "std"), not(test)), no_std)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 //! Segsource is a crate designed to assist in reading data. Although is specifically designed with
 //! binary (`u8`) data, it is not limited to this.
 //!
@@ -82,7 +83,7 @@
 //! # let source = SourceOfYourChoice::from_u8_slice_with_offset(&test_data, 100, Endidness::Big).
 //! #   unwrap();
 //! # let segment = source.all().unwrap();
-//! assert!(matches!(segment.u8_at(99), Err(Error::OffsetTooSmall(99))));
+//! assert!(matches!(segment.u8_at(99), Err(Error::OffsetTooSmall { offset :99 })));
 //! ```
 
 #[cfg(not(feature = "std"))]
@@ -99,6 +100,9 @@ pub use error::*;
 pub(crate) mod segment;
 pub use segment::*;
 
+#[cfg(feature = "derive")]
+#[doc(hidden)]
+pub mod derive_extras;
 #[doc(hidden)]
 pub mod marker;
 

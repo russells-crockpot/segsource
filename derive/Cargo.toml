@@ -27,4 +27,4 @@ path = "../../pmhelp/pmhelp"
 version = "0.0.1"
 
 [features]
-syn-full = []
+syn-full = ["syn/full"]

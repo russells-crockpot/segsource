@@ -190,6 +190,11 @@ impl<'s> DataSegment<'s> {
         let pos = self.adj_pos(N::WIDTH as i128)?;
         self.int_at(self.pos_to_offset(pos))
     }
+
+    make_num_method! {u8, peek_u8, peek_int,
+    "See the documentation for [`Segment::peek_int`].\n\n",
+    "Note: Only available if the [`Segment`]'s I is `u8`."}
+
     make_num_method! {u16, peek_u16, peek_int,
     "See the documentation for [`Segment::peek_int`].\n\n",
     "Note: Only available if the [`Segment`]'s I is `u8`."}

@@ -10,7 +10,7 @@ use syn::{
 
 mod kw {
     syn::custom_keyword!(error);
-    //TODO add support for then to have generics
+    //TODO add support for them to have generics
     //TODO support naming/unpacking
     syn::custom_keyword!(also_needs);
     syn::custom_keyword!(item);

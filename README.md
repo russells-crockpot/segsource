@@ -18,11 +18,12 @@ reference to this data, etcetera.
 The following features are available for segsource:
 
 1. `async` which adds support for various `async` operations using `tokio`.
-2. `bytes` which adds support for using the `bytes` crate.
-3. `derive` which includes several macros for creating structs from [`Segment`]s.
-4. `mmap` which adds support for memory mapped files.
+2. `derive` which includes several macros for creating structs from [`Segment`]s.
+3. `mmap` which adds support for memory mapped files.
+4. `std` which adds support for file and I/O operations.
+5. `with_bytes` which adds support for using the `bytes` crate.
 
-Of these, only `derive` is enabled by default.
+Of these, only `derive` and `std` are enabled by default.
 
 ### Why segsource?
 
@@ -74,7 +75,7 @@ One thing you may have noticed is that we had to unwrap the value each time. Thi
 methods first check to make an offset is valid. For example:
 
 ```rust
-assert!(matches!(segment.u8_at(99), Err(Error::OffsetTooSmall(99))));
+assert!(matches!(segment.u8_at(99), Err(Error::OffsetTooSmall { offset :99 })));
 ```
 
 License: MIT
