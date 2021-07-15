@@ -21,3 +21,5 @@ t[0-9].*
 *.swp
 /flamegraph.svg
 /perf.data
+to_expand.rs
+expanded.rs

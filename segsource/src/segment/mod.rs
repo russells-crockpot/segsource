@@ -43,7 +43,7 @@ pub struct Segment<'s, I> {
 }
 
 impl<'s, I> Segment<'s, I> {
-    fn new_full(
+    pub(crate) fn new_full(
         data: &'s [I],
         initial_offset: usize,
         position: usize,

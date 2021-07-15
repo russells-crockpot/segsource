@@ -5,17 +5,76 @@ use crate::{
 };
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
+#[cfg(feature = "async")]
+use async_trait::async_trait;
+#[cfg(feature = "with_bytes")]
+use bytes::Bytes;
 #[cfg(feature = "std")]
 use std::path::Path;
+
+macro_rules! add_basic_source_items {
+    ($data_prop_name:ident) => {
+        #[inline]
+        fn initial_offset(&self) -> usize {
+            self.initial_offset
+        }
+
+        #[inline]
+        fn change_initial_offset(&mut self, offset: usize) {
+            self.initial_offset = offset
+        }
+
+        #[inline]
+        fn size(&self) -> usize {
+            self.$data_prop_name.len() as usize
+        }
+    };
+    (@add_u8_items, $data_prop_name:ident) => {
+        add_basic_source_items! { $data_prop_name }
+
+        #[inline]
+        fn from_vec_with_offset(items: Vec<Self::Item>, initial_offset: usize) -> Result<Self> {
+            Self::from_u8_slice_with_offset(&items, initial_offset, Endidness::default())
+        }
+
+        fn segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
+            self.validate_offset(start)?;
+            self.validate_offset(end)?;
+            Ok(Segment::with_offset_and_endidness(
+                &self.$data_prop_name
+                    [(start - self.initial_offset) as usize..(end - self.initial_offset) as usize],
+                start,
+                self.endidness,
+            ))
+        }
+    };
+    () => {
+        add_basic_source_items! { data }
+    };
+    (@add_u8_items) => {
+        add_basic_source_items! { @add_u8_items, data }
+    };
+}
+
+macro_rules! impl_endidness_items {
+    () => {
+        #[inline]
+        fn endidness(&self) -> Endidness {
+            self.endidness
+        }
+
+        #[inline]
+        fn change_endidness(&mut self, endidness: Endidness) {
+            self.endidness = endidness
+        }
+    };
+}
 
 mod vec_source;
 pub use vec_source::VecSource;
 
-//mod segment_like;
-//pub use segment_like::*;
-
-#[cfg(feature = "with_bytes")]
-use bytes::Bytes;
+mod segment_like;
+pub use segment_like::*;
 #[cfg(feature = "with_bytes")]
 mod bytes_source;
 
@@ -26,9 +85,6 @@ pub use bytes_source::BytesSource;
 mod mmap;
 #[cfg(feature = "memmap")]
 pub use mmap::MappedFileSource;
-
-#[cfg(feature = "async")]
-use async_trait::async_trait;
 
 /// Sources own their own data and are used to generate [`Segment`]s. The following sources are
 /// included with segsource (although others can be implemented):
@@ -42,7 +98,7 @@ use async_trait::async_trait;
 ///
 /// When a [`Source`] creates a new [`Segment`], that segment will have the same initial offset and
 /// (if applicable) the same endidness as the source.
-pub trait Source: Sized + Sync + Send {
+pub trait Source: Sized {
     /// The type of item the [`Source`] and its generated [`Segment`]s will hold.
     type Item;
 
@@ -75,6 +131,11 @@ pub trait Source: Sized + Sync + Send {
     /// The initial offset of the [`Source`]. For more information, see the **Offsets** section
     /// of the [`Source`] documentation.
     fn initial_offset(&self) -> usize;
+
+    /// Changes the [`Source::initial_offset`] This does **not** change the initial offset for any
+    /// [`Segment`]s that have already been created, but all new [`Segment`]s will use the new
+    /// offset.
+    fn change_initial_offset(&mut self, offset: usize);
 
     /// Returns a single segment containing all data in the source.
     fn all(&self) -> Result<Segment<Self::Item>> {
@@ -116,7 +177,6 @@ pub trait Source: Sized + Sync + Send {
     }
 }
 
-#[cfg_attr(feature = "async", async_trait)]
 /// Segsource is mostly meant to work with binary data (although it by no means has to). Because of
 /// this, sources can have some extra functionality when its item type is `u8`.
 pub trait U8Source: Source<Item = u8> {
@@ -124,7 +184,7 @@ pub trait U8Source: Source<Item = u8> {
     fn endidness(&self) -> Endidness;
 
     /// Changes the default endidness. This does **not** change the endidness for any [`Segment`]s
-    /// that have already been created, but only for [`Segment`]s that are created in the future.
+    /// that have already been created, but all new [`Segment`]s will use the new endidness.
     fn change_endidness(&mut self, endidness: Endidness);
 
     /// Creates a new source using the the provided slice and [`Endidness`].
@@ -175,26 +235,6 @@ pub trait U8Source: Source<Item = u8> {
         endidness: Endidness,
     ) -> Result<Self>;
 
-    #[cfg(feature = "async")]
-    /// An async version of [`U8Source::from_file`].
-    #[inline]
-    async fn from_file_async<P>(path: P, endidness: Endidness) -> Result<Self>
-    where
-        P: AsRef<Path> + Sync + Send,
-    {
-        Self::from_file_with_offset_async(path, 0, endidness).await
-    }
-
-    #[cfg(feature = "async")]
-    /// An async version of [`U8Source::from_file_with_offset`].
-    async fn from_file_with_offset_async<P>(
-        path: P,
-        initial_offset: usize,
-        endidness: Endidness,
-    ) -> Result<Self>
-    where
-        P: AsRef<Path> + Sync + Send;
-
     #[cfg(feature = "with_bytes")]
     /// Creates a new source using the the provided Bytes and [`Endidness`].
     #[inline]
@@ -209,4 +249,27 @@ pub trait U8Source: Source<Item = u8> {
         initial_offset: usize,
         endidness: Endidness,
     ) -> Result<Self>;
+}
+
+#[cfg(feature = "async")]
+/// A trait that extends a [`U8Source`] with some additional, asynchronous methods.
+#[async_trait]
+pub trait AsyncU8Source: U8Source {
+    /// An async version of [`U8Source::from_file`].
+    #[inline]
+    async fn from_file_async<P>(path: P, endidness: Endidness) -> Result<Self>
+    where
+        P: AsRef<Path> + Sync + Send,
+    {
+        Self::from_file_with_offset_async(path, 0, endidness).await
+    }
+
+    /// An async version of [`U8Source::from_file_with_offset`].
+    async fn from_file_with_offset_async<P>(
+        path: P,
+        initial_offset: usize,
+        endidness: Endidness,
+    ) -> Result<Self>
+    where
+        P: AsRef<Path> + Sync + Send;
 }

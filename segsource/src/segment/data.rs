@@ -74,17 +74,26 @@ impl<'s> DataSegment<'s> {
         ))
     }
 
+    pub fn int_at_with_endidness<N: Integer>(
+        &self,
+        offset: usize,
+        endidness: Endidness,
+    ) -> Result<N> {
+        self.validate_offset(offset, N::WIDTH - 1)?;
+        Ok(N::with_endidness(
+            &self[offset..offset + N::WIDTH],
+            endidness,
+        ))
+    }
+
     /// Gets an integer of the provided type (e.g. `u8`, `i8`, `u16`, `i16`, etcetera) at the given
     /// offset without altering the [`Segment::current_offset`]. In most cases, you should use
     /// methods like [`Segment::u8_at`] instead.
     ///
     /// Note: Only available if the [`Segment`]'s I is `u8`.
+    #[inline]
     pub fn int_at<N: Integer>(&self, offset: usize) -> Result<N> {
-        self.validate_offset(offset, N::WIDTH - 1)?;
-        Ok(N::with_endidness(
-            &self[offset..offset + N::WIDTH],
-            self.endidness,
-        ))
+        self.int_at_with_endidness(offset, self.endidness)
     }
 
     #[inline]

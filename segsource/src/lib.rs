@@ -37,9 +37,8 @@
 //!   "back". Segsource solves both of these cases.
 //!
 //! - `binread`: Not a replacement for `segsource` as a whole, but for the derivations provided via
-//!   the `derive` feature. As of this writing, `binread` is more feature rich than `segsource`'s
-//!   derives (and since [`Segment`]s extend `std::io::Seek` and `std::io::Read`, they will work
-//!   with `binread`]. Unfortunately, this again requires the passed in
+//!   the `derive` feature. While segsource's derive feature has more, well, features, it is also
+//!   currently undocumented.
 //!
 //! - `bitvec`: You may have noticed that you can essentially do simple memory emulation with
 //!   `segsource (e.g. you can have an initial offset, you work in offsets, etcetera). Simple, being

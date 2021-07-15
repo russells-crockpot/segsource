@@ -1,5 +1,7 @@
 #[cfg(feature = "async")]
 use crate::sync::async_u8_vec_from_file;
+#[cfg(feature = "async")]
+use crate::AsyncU8Source;
 use crate::{Endidness, Result, Segment, Source, U8Source};
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
@@ -31,16 +33,7 @@ impl<I: Sync + Send> VecSource<I> {
 
 impl<I: Sync + Send> Source for VecSource<I> {
     type Item = I;
-
-    #[inline]
-    fn initial_offset(&self) -> usize {
-        self.initial_offset
-    }
-
-    #[inline]
-    fn size(&self) -> usize {
-        self.data.len() as usize
-    }
+    add_basic_source_items! {}
 
     #[inline]
     fn from_vec_with_offset(items: Vec<Self::Item>, initial_offset: usize) -> Result<Self> {
@@ -54,41 +47,18 @@ impl<I: Sync + Send> Source for VecSource<I> {
     fn segment(&self, start: usize, end: usize) -> Result<Segment<I>> {
         self.validate_offset(start)?;
         self.validate_offset(end)?;
-        Ok(Segment::with_offset(
+        Ok(Segment::new_full(
             &self.data
                 [(start - self.initial_offset) as usize..(end - self.initial_offset) as usize],
             start,
+            0,
+            self.endidness,
         ))
     }
 }
 
-#[cfg_attr(feature = "async", async_trait)]
 impl U8Source for VecSource<u8> {
-    #[inline]
-    fn endidness(&self) -> Endidness {
-        self.endidness
-    }
-
-    #[inline]
-    fn change_endidness(&mut self, endidness: Endidness) {
-        self.endidness = endidness;
-    }
-
-    #[cfg(feature = "async")]
-    async fn from_file_with_offset_async<P>(
-        path: P,
-        initial_offset: usize,
-        endidness: Endidness,
-    ) -> Result<Self>
-    where
-        P: AsRef<Path> + Sync + Send,
-    {
-        Ok(Self::new(
-            async_u8_vec_from_file(path).await?,
-            initial_offset,
-            endidness,
-        ))
-    }
+    impl_endidness_items! {}
 
     #[cfg(feature = "std")]
     #[inline]
@@ -147,4 +117,24 @@ impl U8Source for VecSource<u8> {
     //self.endidness,
     //))
     //}
+}
+
+#[cfg(feature = "async")]
+#[async_trait]
+impl AsyncU8Source for VecSource<u8> {
+    #[cfg(feature = "async")]
+    async fn from_file_with_offset_async<P>(
+        path: P,
+        initial_offset: usize,
+        endidness: Endidness,
+    ) -> Result<Self>
+    where
+        P: AsRef<Path> + Sync + Send,
+    {
+        Ok(Self::new(
+            async_u8_vec_from_file(path).await?,
+            initial_offset,
+            endidness,
+        ))
+    }
 }

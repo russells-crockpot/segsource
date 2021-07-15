@@ -1,3 +1,5 @@
+#[cfg(feature = "async")]
+use crate::AsyncU8Source;
 use crate::{Endidness, Result, Segment, Source, U8Source};
 #[cfg(feature = "with_bytes")]
 use bytes::Bytes;
@@ -52,36 +54,12 @@ impl MappedFileSource {
 
 impl Source for MappedFileSource {
     type Item = u8;
-
-    #[inline]
-    fn size(&self) -> usize {
-        self.data.len() as usize
-    }
-
-    #[inline]
-    fn initial_offset(&self) -> usize {
-        self.initial_offset
-    }
-
-    #[inline]
-    fn from_vec_with_offset(items: Vec<Self::Item>, initial_offset: usize) -> Result<Self> {
-        Self::from_u8_slice_with_offset(&items, initial_offset, Endidness::default())
-    }
-
-    fn segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
-        self.validate_offset(start)?;
-        self.validate_offset(end)?;
-        Ok(Segment::with_offset_and_endidness(
-            &self.data
-                [(start - self.initial_offset) as usize..(end - self.initial_offset) as usize],
-            start,
-            self.endidness,
-        ))
-    }
+    add_basic_source_items! {@add_u8_items}
 }
 
-#[cfg_attr(feature = "async", async_trait)]
 impl U8Source for MappedFileSource {
+    impl_endidness_items! {}
+
     fn from_file_with_offset<P: AsRef<Path>>(
         path: P,
         initial_offset: usize,
@@ -109,22 +87,6 @@ impl U8Source for MappedFileSource {
         Self::from_u8_slice_with_offset(&bytes, initial_offset, endidness)
     }
 
-    #[cfg(feature = "async")]
-    #[inline]
-    async fn from_file_with_offset_async<P>(
-        path: P,
-        initial_offset: usize,
-        endidness: Endidness,
-    ) -> Result<Self>
-    where
-        P: AsRef<Path> + Sync + Send,
-    {
-        let path = path.as_ref().to_path_buf();
-        spawn_blocking(move || Self::from_file_with_offset(path, initial_offset, endidness))
-            .await
-            .unwrap()
-    }
-
     fn from_u8_slice_with_offset(
         bytes: &[u8],
         initial_offset: usize,
@@ -141,20 +103,30 @@ impl U8Source for MappedFileSource {
         ))
     }
 
-    #[inline]
-    fn endidness(&self) -> Endidness {
-        self.endidness
-    }
-
-    #[inline]
-    fn change_endidness(&mut self, endidness: Endidness) {
-        self.endidness = endidness
-    }
-
     //#[inline]
     //fn u8_segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
     //Source::segment(self, start, end)
     //}
+}
+
+#[cfg(feature = "async")]
+#[async_trait]
+impl AsyncU8Source for MappedFileSource {
+    #[cfg(feature = "async")]
+    #[inline]
+    async fn from_file_with_offset_async<P>(
+        path: P,
+        initial_offset: usize,
+        endidness: Endidness,
+    ) -> Result<Self>
+    where
+        P: AsRef<Path> + Sync + Send,
+    {
+        let path = path.as_ref().to_path_buf();
+        spawn_blocking(move || Self::from_file_with_offset(path, initial_offset, endidness))
+            .await
+            .unwrap()
+    }
 }
 
 impl Drop for MappedFileSource {

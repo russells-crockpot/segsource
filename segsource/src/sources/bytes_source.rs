@@ -2,6 +2,8 @@
 use crate::sync::async_bytes_from_file;
 #[cfg(all(feature = "async", not(feature = "with_bytes")))]
 use crate::sync::async_u8_vec_from_file;
+#[cfg(feature = "async")]
+use crate::AsyncU8Source;
 use crate::{Endidness, Result, Segment, Source, U8Source};
 use bytes::{BufMut as _, Bytes, BytesMut};
 use std::{fs, io, path::Path};
@@ -32,34 +34,9 @@ impl BytesSource {
 impl Source for BytesSource {
     type Item = u8;
 
-    #[inline]
-    fn initial_offset(&self) -> usize {
-        self.initial_offset
-    }
-
-    #[inline]
-    fn size(&self) -> usize {
-        self.data.len() as usize
-    }
-
-    #[inline]
-    fn from_vec_with_offset(items: Vec<Self::Item>, initial_offset: usize) -> Result<Self> {
-        Self::from_u8_vec_with_offset(items, initial_offset, Endidness::default())
-    }
-
-    fn segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
-        self.validate_offset(start)?;
-        self.validate_offset(end)?;
-        Ok(Segment::with_offset_and_endidness(
-            &self.data
-                [(start - self.initial_offset) as usize..(end - self.initial_offset) as usize],
-            start,
-            self.endidness,
-        ))
-    }
+    add_basic_source_items! {@add_u8_items}
 }
 
-#[cfg_attr(feature = "async", async_trait)]
 impl U8Source for BytesSource {
     #[inline]
     fn from_file_with_offset<P: AsRef<Path>>(
@@ -70,6 +47,47 @@ impl U8Source for BytesSource {
         Ok(Self::new(bytes_from_file(path)?, initial_offset, endidness))
     }
 
+    #[inline]
+    fn from_bytes_with_offset(
+        bytes: Bytes,
+        initial_offset: usize,
+        endidness: Endidness,
+    ) -> Result<Self> {
+        Ok(Self::new(bytes, initial_offset, endidness))
+    }
+    impl_endidness_items! {}
+
+    #[inline]
+    fn from_u8_vec_with_offset(
+        items: Vec<u8>,
+        initial_offset: usize,
+        endidness: Endidness,
+    ) -> Result<Self> {
+        Ok(Self::new(Bytes::from(items), initial_offset, endidness))
+    }
+
+    #[inline]
+    fn from_u8_slice_with_offset(
+        items: &[u8],
+        initial_offset: usize,
+        endidness: Endidness,
+    ) -> Result<Self> {
+        Ok(Self::new(
+            Bytes::copy_from_slice(items),
+            initial_offset,
+            endidness,
+        ))
+    }
+
+    //#[inline]
+    //fn u8_segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
+    //Source::segment(self, start, end)
+    //}
+}
+
+#[cfg(feature = "async")]
+#[async_trait]
+impl AsyncU8Source for BytesSource {
     #[cfg(all(feature = "async", feature = "with_bytes"))]
     async fn from_file_with_offset_async<P>(
         path: P,
@@ -101,52 +119,6 @@ impl U8Source for BytesSource {
             endidness,
         ))
     }
-
-    #[inline]
-    fn from_bytes_with_offset(
-        bytes: Bytes,
-        initial_offset: usize,
-        endidness: Endidness,
-    ) -> Result<Self> {
-        Ok(Self::new(bytes, initial_offset, endidness))
-    }
-
-    #[inline]
-    fn endidness(&self) -> Endidness {
-        self.endidness
-    }
-
-    #[inline]
-    fn change_endidness(&mut self, endidness: Endidness) {
-        self.endidness = endidness
-    }
-
-    #[inline]
-    fn from_u8_vec_with_offset(
-        items: Vec<u8>,
-        initial_offset: usize,
-        endidness: Endidness,
-    ) -> Result<Self> {
-        Ok(Self::new(Bytes::from(items), initial_offset, endidness))
-    }
-
-    #[inline]
-    fn from_u8_slice_with_offset(
-        items: &[u8],
-        initial_offset: usize,
-        endidness: Endidness,
-    ) -> Result<Self> {
-        Ok(Self::new(
-            Bytes::copy_from_slice(items),
-            initial_offset,
-            endidness,
-        ))
-    }
-
-    //#[inline]
-    //fn u8_segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
-    //Source::segment(self, start, end)
-    //}
 }
 
 fn bytes_from_file<P: AsRef<Path>>(path: P) -> io::Result<Bytes> {
