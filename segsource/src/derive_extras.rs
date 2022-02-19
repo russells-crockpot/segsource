@@ -12,6 +12,8 @@ use core::{
 #[cfg(feature = "std")]
 use std::vec::IntoIter as VecIter;
 
+//TODO
+#[allow(clippy::needless_collect)]
 pub fn iter_to_result<V, E, I>(mut iter: I) -> Result<VecIter<V>, E>
 where
     I: Iterator<Item = Result<V, E>>,

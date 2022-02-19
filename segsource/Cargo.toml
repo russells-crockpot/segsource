@@ -39,11 +39,12 @@ optional = true
 
 [features]
 default = ["derive", "std"]
-with_bytes = ["bytes", "std"]
+with-bytes = ["bytes", "std"]
 derive = ["segsource-derive"]
 memmap = [ "fs3", "memmap2", "std"]
 async = ["tokio", "async-trait", "pin-project-lite", "futures-core", "std"]
 std = ["snafu/std"]
+backtrace = ["snafu/backtraces"]
 
 [dev-dependencies]
 color-backtrace = "0.5"

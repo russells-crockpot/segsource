@@ -1,9 +1,9 @@
 use crate::{Endidness, Result, Segment, Source, U8Source};
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, vec::Vec};
-#[cfg(feature = "with_bytes")]
+#[cfg(feature = "with-bytes")]
 use bytes::Bytes;
-use core::ops::Deref;
+use core::{marker::PhantomPinned, ops::Deref};
 #[cfg(feature = "std")]
 use std::path::Path;
 
@@ -12,7 +12,7 @@ use std::path::Path;
 ///
 /// **Note**: Unlike most [`Source`]s, this one is neither `Sync` nor `Send`. Because of this,
 /// unlike other sources, it does not implement the [`crate::AsyncU8Source`] trait.
-pub struct SegmentLikeSource<'s, S>(*const Segment<'s, S::Item>, *mut S)
+pub struct SegmentLikeSource<'s, S>(*const Segment<'s, S::Item>, *mut S, PhantomPinned)
 where
     Self: 'static,
     S: Source + 'static;
@@ -26,7 +26,7 @@ where
         let src_ptr = Box::into_raw(Box::new(source));
         let segment = unsafe { Box::new((*src_ptr).all()?) };
         let seg_ptr = Box::into_raw(segment);
-        Ok(Self(seg_ptr, src_ptr))
+        Ok(Self(seg_ptr, src_ptr, PhantomPinned))
     }
 }
 
@@ -68,12 +68,38 @@ where
 {
     type Item = S::Item;
 
+    #[inline]
+    fn from_segment(segment: Segment<'_, Self::Item>) -> Result<Self>
+    where
+        Self::Item: Clone,
+    {
+        Self::new(S::from_segment(segment)?)
+    }
+
+    #[inline]
     fn from_vec(items: Vec<Self::Item>) -> Result<Self> {
         Self::new(S::from_vec(items)?)
     }
 
+    #[inline]
     fn from_vec_with_offset(items: Vec<Self::Item>, initial_offset: usize) -> Result<Self> {
         Self::new(S::from_vec_with_offset(items, initial_offset)?)
+    }
+
+    #[inline]
+    fn from_slice(slice: &[Self::Item]) -> Result<Self>
+    where
+        Self::Item: Clone,
+    {
+        Self::new(S::from_slice(slice)?)
+    }
+
+    #[inline]
+    fn from_slice_with_offset(slice: &[Self::Item], initial_offset: usize) -> Result<Self>
+    where
+        Self::Item: Clone,
+    {
+        Self::new(S::from_slice_with_offset(slice, initial_offset)?)
     }
 
     impl_source_proxy_func! { validate_offset(offset: usize) -> Result<()> }
@@ -114,10 +140,10 @@ where
     impl_u8_source_proxy_func! { from_u8_vec_with_offset(
     items: Vec<u8>, initial_offset: usize, endidness: Endidness) }
 
-    #[cfg(feature = "with_bytes")]
+    #[cfg(feature = "with-bytes")]
     impl_u8_source_proxy_func! { from_bytes(bytes: Bytes, endidness: Endidness) }
 
-    #[cfg(feature = "with_bytes")]
+    #[cfg(feature = "with-bytes")]
     impl_u8_source_proxy_func! { from_bytes_with_offset(
     bytes: Bytes, initial_offset: usize, endidness: Endidness) }
 

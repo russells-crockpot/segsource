@@ -80,7 +80,7 @@ macro_rules! make_source_segment_test_fn {
 
 pub(crate) type U8VecSource = VecSource<u8>;
 make_source_tests! {U8VecSource, vec}
-#[cfg(feature = "with_bytes")]
+#[cfg(feature = "with-bytes")]
 make_source_tests! {BytesSource, bytes}
 #[cfg(feature = "memmap")]
 make_source_tests! {MappedFileSource, memmap}

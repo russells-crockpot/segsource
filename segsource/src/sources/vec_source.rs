@@ -5,7 +5,7 @@ use crate::AsyncU8Source;
 use crate::{Endidness, Result, Segment, Source, U8Source};
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
-#[cfg(feature = "with_bytes")]
+#[cfg(feature = "with-bytes")]
 use bytes::Bytes;
 #[cfg(feature = "std")]
 use std::{fs, io::Read as _, path::Path};
@@ -34,6 +34,14 @@ impl<I: Sync + Send> VecSource<I> {
 impl<I: Sync + Send> Source for VecSource<I> {
     type Item = I;
     add_basic_source_items! {}
+
+    #[inline]
+    fn from_slice_with_offset(slice: &[Self::Item], initial_offset: usize) -> Result<Self>
+    where
+        Self::Item: Clone,
+    {
+        Self::from_vec_with_offset(slice.to_vec(), initial_offset)
+    }
 
     #[inline]
     fn from_vec_with_offset(items: Vec<Self::Item>, initial_offset: usize) -> Result<Self> {
@@ -77,7 +85,7 @@ impl U8Source for VecSource<u8> {
     }
 
     #[inline]
-    #[cfg(feature = "with_bytes")]
+    #[cfg(feature = "with-bytes")]
     fn from_bytes_with_offset(
         bytes: Bytes,
         initial_offset: usize,

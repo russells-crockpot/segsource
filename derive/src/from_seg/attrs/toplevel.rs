@@ -4,8 +4,8 @@ use quote::{format_ident, quote, ToTokens};
 use syn::{
     parse::{Parse, ParseStream, Result},
     punctuated::Punctuated,
-    Data, DataEnum, DataStruct, DeriveInput, Fields, FieldsNamed, FieldsUnnamed, Ident, Token,
-    Type, TypePath,
+    Data, DataEnum, DataStruct, DeriveInput, Fields, FieldsNamed, FieldsUnnamed, Ident, Path,
+    Token, Type, TypePath,
 };
 
 mod kw {
@@ -14,6 +14,8 @@ mod kw {
     //TODO support naming/unpacking
     syn::custom_keyword!(also_needs);
     syn::custom_keyword!(item);
+    syn::custom_keyword!(preparse);
+    syn::custom_keyword!(postparse);
 }
 
 pub struct AlsoNeedsEntry {
@@ -33,6 +35,7 @@ impl Parse for AlsoNeedsEntry {
     }
 }
 
+#[derive(Default)]
 pub struct AlsoNeeds {
     segment_generics: Option<TokenStream>,
     additional_types: Option<Punctuated<AlsoNeedsEntry, Token![,]>>,
@@ -87,15 +90,6 @@ impl AlsoNeeds {
     }
 }
 
-impl Default for AlsoNeeds {
-    fn default() -> Self {
-        Self {
-            segment_generics: None,
-            additional_types: None,
-        }
-    }
-}
-
 impl Parse for AlsoNeeds {
     #[inline]
     fn parse(stream: ParseStream) -> Result<Self> {
@@ -110,6 +104,8 @@ enum FromSegEntry {
     Error(Type),
     Item(Type),
     AlsoNeeds(AlsoNeeds),
+    Preparse(Path),
+    Postparse(Path),
 }
 
 impl FromSegEntry {
@@ -118,6 +114,8 @@ impl FromSegEntry {
             Self::Item(ty) => info.item_type = ty,
             Self::Error(ty) => info.error_type = Some(ty),
             Self::AlsoNeeds(also_needs) => info.also_needs = also_needs,
+            Self::Preparse(path) => info.preparse = Some(path),
+            Self::Postparse(path) => info.postparse = Some(path),
         }
     }
 }
@@ -126,6 +124,10 @@ impl Parse for FromSegEntry {
     fn parse(stream: ParseStream) -> Result<Self> {
         if stream.peek_and_consume(kw::error) {
             Ok(Self::Error(from_parens!(stream).parse()?))
+        } else if stream.peek_and_consume(kw::preparse) {
+            Ok(Self::Preparse(from_parens!(stream).parse()?))
+        } else if stream.peek_and_consume(kw::postparse) {
+            Ok(Self::Postparse(from_parens!(stream).parse()?))
         } else if stream.peek_and_consume(kw::item) {
             Ok(Self::Item(from_parens!(stream).parse()?))
         } else if stream.peek_and_consume(kw::also_needs) {
@@ -140,6 +142,8 @@ pub struct FromSegInfo {
     pub error_type: Option<Type>,
     pub item_type: Type,
     pub also_needs: AlsoNeeds,
+    pub preparse: Option<Path>,
+    pub postparse: Option<Path>,
 }
 
 impl Default for FromSegInfo {
@@ -151,6 +155,8 @@ impl Default for FromSegInfo {
                 path: format_ident!("u8").into(),
             }),
             also_needs: Default::default(),
+            preparse: None,
+            postparse: None,
         }
     }
 }

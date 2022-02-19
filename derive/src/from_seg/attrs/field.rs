@@ -72,6 +72,7 @@ impl Parse for AlsoPassEntry {
     }
 }
 
+#[derive(Default)]
 pub struct AlsoPass {
     suffix: Option<TokenStream>,
     subseg: Option<Box<Expr>>,
@@ -124,17 +125,6 @@ impl AlsoPass {
             }
         } else {
             default
-        }
-    }
-}
-
-impl Default for AlsoPass {
-    fn default() -> Self {
-        Self {
-            suffix: None,
-            subseg: None,
-            segment_type: None,
-            additional_types: None,
         }
     }
 }
@@ -288,6 +278,7 @@ enum FromSegEntry {
     Mut,
     ParseEach,
     Subseg(Box<Expr>),
+    While(Box<Expr>),
 }
 
 impl FromSegEntry {
@@ -305,6 +296,7 @@ impl FromSegEntry {
             Self::MoveTo(value) => from_seg.move_to = Some(value),
             Self::MoveBy(value) => from_seg.move_by = Some(value),
             Self::Subseg(value) => from_seg.subseg = Some(value),
+            Self::While(value) => from_seg.take_while = Some(value),
             Self::MapEach(value) => {
                 from_seg.from_iter = true;
                 from_seg.map_each = Some(value);
@@ -328,6 +320,8 @@ impl Parse for FromSegEntry {
             Ok(Self::NoWrap)
         } else if stream.peek_and_consume(kw::parse_each) {
             Ok(Self::ParseEach)
+        } else if stream.peek_and_consume(Token![while]) {
+            Ok(Self::While(from_parens!(stream).parse()?))
         // } else if stream.peek_and_consume(kw::subseg) {
         //     Ok(Self::Subseg(from_parens!(stream).parse()?))
         } else if stream.peek_and_consume(kw::parser) {
@@ -396,6 +390,7 @@ pub struct FromSegField {
     move_to: Option<Box<Expr>>,
     move_by: Option<Box<Expr>>,
     subseg: Option<Box<Expr>>,
+    take_while: Option<Box<Expr>>,
     make_mut: bool,
     parse_each: bool,
 }
@@ -443,6 +438,7 @@ impl FromSegField {
             move_to: None,
             move_by: None,
             subseg: None,
+            take_while: None,
             make_mut: false,
             parse_each: false,
         }
@@ -492,15 +488,27 @@ impl FromSegField {
     }
 
     fn get_parse_each(&self) -> TokenStream {
+        let take_while = self
+            .take_while
+            .as_ref()
+            .map(|tw| quote! {.take_while(|value| #tw)});
         let map_each = self.get_map_each();
-        let iter_def = self.size.as_ref().unwrap().get_parse_each_tokens();
+        let iter_def = if let Some(size) = &self.size {
+            size.get_parse_each_tokens()
+        } else if self.take_while.is_some() {
+            quote! {.into_iter()}
+        } else {
+            unreachable!();
+        };
         let gen_val = self.get_simple_assign_val_no_suffix(self.also_pass.get_args());
         if self.generating_try_from && matches!(self.try_, TryOption::Default | TryOption::Try) {
             let suffix = self.get_try_suffix_ignore_none();
             quote! {
                 ::segsource::derive_extras::iter_to_result(::core::iter::repeat(true)
-                #iter_def
-                .map(|_| #gen_val))#suffix
+                    #iter_def
+                    .map(|_| #gen_val)
+                    #take_while
+                )#suffix
                 #map_each
                 .collect()
             }
@@ -509,6 +517,7 @@ impl FromSegField {
                 ::core::iter::repeat(true)
                 #iter_def
                 .map(|_| -> #gen_val)
+                #take_while
                 #map_each
                 .collect()
             }
@@ -629,11 +638,14 @@ impl From<(usize, (Field, bool, Rc<AlsoNeeds>))> for FromSegField {
         if me.default_value.is_some() && (me.if_.is_none() || !me.skip) {
             panic!("Cannot specify default_value without an if condition or skip!")
         }
-        if (me.map_each.is_some() || me.from_iter) && me.size.is_none() {
-            panic!("A size is needed for parse_each values!")
+        if (me.map_each.is_some() || me.from_iter || me.parse_each)
+            && me.size.is_none()
+            && me.take_while.is_none()
+        {
+            panic!("A size or take_while is needed for repeated values!")
         }
         if me.move_to.is_some() && me.move_by.is_some() {
-            panic!("move_to or move_by can be specified, not both.")
+            panic!("Either move_to or move_by can be specified, not both.")
         }
         me.also_pass.segment_type = Some(me.also_needs.get_segment_type());
         me.also_pass.suffix = Some(me.get_try_suffix_ignore_none());

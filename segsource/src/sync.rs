@@ -14,7 +14,7 @@ use tokio::{
     fs,
     io::{AsyncBufRead, BufReader},
 };
-#[cfg(not(feature = "with_bytes"))]
+#[cfg(not(feature = "with-bytes"))]
 pin_project! {
     /// A future returned by [`u8_vec_from_async_bufread`]. See that function for more details.
     pub struct VecFromAsyncBufread<R: AsyncBufRead> {
@@ -24,7 +24,7 @@ pin_project! {
     }
 }
 
-#[cfg(feature = "with_bytes")]
+#[cfg(feature = "with-bytes")]
 pin_project! {
     /// A future returned by [`u8_vec_from_async_bufread`] and [`bytes_from_async_bufread`]. See
     /// those functions for more details.
@@ -82,7 +82,7 @@ where
     u8_vec_from_async_bufread(reader, Some(md.len() as usize)).await
 }
 
-#[cfg(feature = "with_bytes")]
+#[cfg(feature = "with-bytes")]
 mod with_bytes {
     use bytes::{Bytes, BytesMut};
     use futures_core::ready;
@@ -157,5 +157,5 @@ mod with_bytes {
         bytes_from_async_bufread(reader, Some(md.len() as usize)).await
     }
 }
-#[cfg(feature = "with_bytes")]
+#[cfg(feature = "with-bytes")]
 pub use with_bytes::*;

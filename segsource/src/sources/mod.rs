@@ -7,7 +7,7 @@ use crate::{
 use alloc::vec::Vec;
 #[cfg(feature = "async")]
 use async_trait::async_trait;
-#[cfg(feature = "with_bytes")]
+#[cfg(feature = "with-bytes")]
 use bytes::Bytes;
 #[cfg(feature = "std")]
 use std::path::Path;
@@ -31,10 +31,26 @@ macro_rules! add_basic_source_items {
     };
     (@add_u8_items, $data_prop_name:ident) => {
         add_basic_source_items! { $data_prop_name }
+        #[inline]
+        fn from_slice_with_offset(slice: &[Self::Item], initial_offset: usize) -> Result<Self>
+        where
+            Self::Item: Clone,
+        {
+            Self::from_u8_slice_with_offset(&slice, initial_offset, Endidness::default())
+        }
 
         #[inline]
         fn from_vec_with_offset(items: Vec<Self::Item>, initial_offset: usize) -> Result<Self> {
             Self::from_u8_slice_with_offset(&items, initial_offset, Endidness::default())
+        }
+
+        fn from_segment(segment: Segment<'_, Self::Item>) -> Result<Self>
+        where
+            Self::Item: Clone,
+        {
+            let mut src = Self::from_slice_with_offset(segment.as_ref(), segment.current_offset())?;
+            src.change_endidness(segment.endidness());
+            Ok(src)
         }
 
         fn segment(&self, start: usize, end: usize) -> Result<Segment<u8>> {
@@ -75,10 +91,10 @@ pub use vec_source::VecSource;
 
 mod segment_like;
 pub use segment_like::*;
-#[cfg(feature = "with_bytes")]
+#[cfg(feature = "with-bytes")]
 mod bytes_source;
 
-#[cfg(feature = "with_bytes")]
+#[cfg(feature = "with-bytes")]
 pub use bytes_source::BytesSource;
 
 #[cfg(feature = "memmap")]
@@ -102,7 +118,28 @@ pub trait Source: Sized {
     /// The type of item the [`Source`] and its generated [`Segment`]s will hold.
     type Item;
 
+    fn from_slice_with_offset(slice: &[Self::Item], initial_offset: usize) -> Result<Self>
+    where
+        Self::Item: Clone;
+
+    #[inline]
+    fn from_slice(slice: &[Self::Item]) -> Result<Self>
+    where
+        Self::Item: Clone,
+    {
+        Self::from_slice_with_offset(slice, 0)
+    }
+
+    #[inline]
+    fn from_segment(segment: Segment<'_, Self::Item>) -> Result<Self>
+    where
+        Self::Item: Clone,
+    {
+        Self::from_slice_with_offset(segment.as_ref(), segment.current_offset())
+    }
+
     /// Creates a new source using the data in the `Vec` for its data.
+    #[inline]
     fn from_vec(items: Vec<Self::Item>) -> Result<Self> {
         Self::from_vec_with_offset(items, 0)
     }
@@ -155,13 +192,12 @@ pub trait Source: Sized {
     /// Gets all items in the source before the provided offset (exclusive).
     fn all_before(&self, offset: usize) -> Result<Segment<Self::Item>> {
         self.validate_offset(offset)?;
-        self.get_n(self.lower_offset_limit(), offset)
+        self.segment(self.lower_offset_limit(), offset)
     }
 
     /// Gets all items in the source after the provided offset (inclusive).
     fn all_after(&self, offset: usize) -> Result<Segment<Self::Item>> {
-        self.validate_offset(offset)?;
-        self.get_n(offset, self.upper_offset_limit())
+        self.segment(offset, self.upper_offset_limit())
     }
 
     /// The lowest valid offset that can be requested.
@@ -235,14 +271,14 @@ pub trait U8Source: Source<Item = u8> {
         endidness: Endidness,
     ) -> Result<Self>;
 
-    #[cfg(feature = "with_bytes")]
+    #[cfg(feature = "with-bytes")]
     /// Creates a new source using the the provided Bytes and [`Endidness`].
     #[inline]
     fn from_bytes(bytes: Bytes, endidness: Endidness) -> Result<Self> {
         Self::from_bytes_with_offset(bytes, 0, endidness)
     }
 
-    #[cfg(feature = "with_bytes")]
+    #[cfg(feature = "with-bytes")]
     /// Creates a new source using the the provided Bytes, [`Endidness`], and offset.
     fn from_bytes_with_offset(
         bytes: Bytes,

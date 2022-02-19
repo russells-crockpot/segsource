@@ -1,7 +1,7 @@
 #[cfg(feature = "async")]
 use crate::AsyncU8Source;
 use crate::{Endidness, Result, Segment, Source, U8Source};
-#[cfg(feature = "with_bytes")]
+#[cfg(feature = "with-bytes")]
 use bytes::Bytes;
 use fs3::FileExt as _;
 use memmap2::{Mmap, MmapMut};
@@ -77,7 +77,7 @@ impl U8Source for MappedFileSource {
         ))
     }
 
-    #[cfg(feature = "with_bytes")]
+    #[cfg(feature = "with-bytes")]
     #[inline]
     fn from_bytes_with_offset(
         bytes: Bytes,

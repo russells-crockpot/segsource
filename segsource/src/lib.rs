@@ -21,7 +21,7 @@
 //! 2. `derive` which includes several macros for creating structs from [`Segment`]s.
 //! 3. `mmap` which adds support for memory mapped files.
 //! 4. `std` which adds support for file and I/O operations.
-//! 5. `with_bytes` which adds support for using the `bytes` crate.
+//! 5. `with-bytes` which adds support for using the `bytes` crate.
 //!
 //! Of these, only `derive` and `std` are enabled by default.
 //!

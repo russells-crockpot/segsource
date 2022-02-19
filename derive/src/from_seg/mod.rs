@@ -5,16 +5,41 @@ use quote::quote;
 use syn::{
     parse::{Parser as _, Result},
     punctuated::Punctuated,
-    Data, DataEnum, DataStruct, DeriveInput, Fields, FieldsNamed, FieldsUnnamed, Ident, Token,
-    Type,
+    Data, DataEnum, DataStruct, DeriveInput, Fields, FieldsNamed, FieldsUnnamed, Ident, Path,
+    Token, Type,
 };
 mod attrs;
 use attrs::{AlsoNeeds, FromSegField, FromSegInfo};
+
+fn generate_create_self_stmt(
+    field_names: Punctuated<Ident, Token![,]>,
+    postparse: Option<Path>,
+    tuple_like: bool,
+    generating_try_from: bool,
+) -> TokenStream {
+    let base = if tuple_like {
+        quote! {Self(#field_names)}
+    } else {
+        quote! {Self{#field_names}}
+    };
+    if let Some(postparse) = postparse {
+        if generating_try_from {
+            quote! { Ok(#postparse(#base)?) }
+        } else {
+            quote! { #postparse(#base) }
+        }
+    } else if generating_try_from {
+        quote! { Ok(#base) }
+    } else {
+        base
+    }
+}
 
 fn generate_fields_body(
     ident: &Ident,
     fields: Fields,
     also_needs: Rc<AlsoNeeds>,
+    postparse: Option<Path>,
     generating_try_from: bool,
 ) -> TokenStream {
     let (tuple_like, fields_iter) = match fields {
@@ -29,15 +54,8 @@ fn generate_fields_body(
         .collect();
     let field_names: Punctuated<Ident, Token![,]> =
         fields.iter().map(FromSegField::tmp_var).collect();
-    let create_self_stmt = if tuple_like && generating_try_from {
-        quote! {Ok(Self(#field_names))}
-    } else if tuple_like {
-        quote! {Self(#field_names)}
-    } else if generating_try_from {
-        quote! {Ok(Self{#field_names})}
-    } else {
-        quote! {Self{#field_names}}
-    };
+    let create_self_stmt =
+        generate_create_self_stmt(field_names, postparse, tuple_like, generating_try_from);
     quote! {
         #fields
         #create_self_stmt
@@ -48,11 +66,12 @@ fn generate_body(
     ident: &Ident,
     data: Data,
     also_needs: Rc<AlsoNeeds>,
+    postparse: Option<Path>,
     generating_try_from: bool,
 ) -> TokenStream {
     match data {
         Data::Struct(DataStruct { fields, .. }) => {
-            generate_fields_body(ident, fields, also_needs, generating_try_from)
+            generate_fields_body(ident, fields, also_needs, postparse, generating_try_from)
         }
         Data::Enum(DataEnum { variants, .. }) => todo!(),
         _ => unimplemented!(),
@@ -73,6 +92,8 @@ pub fn base_from_segment(input: DeriveInput, generating_try_from: bool) -> Resul
         item_type,
         error_type,
         mut also_needs,
+        preparse,
+        postparse,
     } = maybe_info.unwrap_or_default();
     if generating_try_from && error_type.is_none() {
         panic!("No error type specified!");
@@ -97,15 +118,29 @@ pub fn base_from_segment(input: DeriveInput, generating_try_from: bool) -> Resul
     } else {
         (
             quote! {::core::convert::From},
-            quote! {from(segment: #segment_type) -> Self},
+            quote! {from(#method_args: #segment_type) -> Self},
         )
     };
-    let body = generate_body(&name, input.data, also_needs, generating_try_from);
+    let preparse = preparse.map(|preparse| {
+        if generating_try_from {
+            quote! { let #method_args = #preparse(#method_args)?; }
+        } else {
+            quote! { let #method_args = #preparse(#method_args); }
+        }
+    });
+    let body = generate_body(
+        &name,
+        input.data,
+        also_needs,
+        postparse,
+        generating_try_from,
+    );
     Ok(quote! {
         impl #impl_g #trait_name<#segment_type> for #name #type_g #maybe_where {
             #error_stmt
             #[allow(unused_parens)]
             fn #method_sig {
+                #preparse
                 #body
             }
         }

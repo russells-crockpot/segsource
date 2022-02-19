@@ -292,7 +292,7 @@ macro_rules! u8_src_from {
 
 macro_rules! add_imports {
     () => {
-        #[cfg(feature = "with_bytes")]
+        #[cfg(feature = "with-bytes")]
         use crate::BytesSource;
         #[cfg(feature = "memmap")]
         use crate::MappedFileSource;
@@ -302,7 +302,7 @@ macro_rules! add_imports {
         };
         #[cfg(not(feature = "std"))]
         use alloc::vec::Vec;
-        #[cfg(feature = "with_bytes")]
+        #[cfg(feature = "with-bytes")]
         use bytes::Bytes;
         use paste::paste;
         #[cfg(feature = "std")]
@@ -414,9 +414,9 @@ macro_rules! make_source_tests {
             make_from_tests! { is_not_u8, $source, vec, Vec::from }
             make_from_tests! { is_u8, $source, u8_slice }
             make_from_tests! { is_u8, $source, u8_vec, Vec::from }
-            #[cfg(feature = "with_bytes")]
+            #[cfg(feature = "with-bytes")]
             make_from_tests! { is_u8, $source, bytes, Bytes::copy_from_slice }
-            //#[cfg(feature = "with_bytes")]
+            //#[cfg(feature = "with-bytes")]
             //make_from_tests!{ is_u8, $source, bytes, Bytes::from }
         }
     };
@@ -424,7 +424,7 @@ macro_rules! make_source_tests {
 
 pub(crate) type U8VecSource = VecSource<u8>;
 make_source_tests! {U8VecSource, vec}
-#[cfg(feature = "with_bytes")]
+#[cfg(feature = "with-bytes")]
 make_source_tests! {BytesSource, bytes}
 #[cfg(feature = "memmap")]
 make_source_tests! {MappedFileSource, memmap}

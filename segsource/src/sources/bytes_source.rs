@@ -1,6 +1,6 @@
-#[cfg(all(feature = "async", feature = "with_bytes"))]
+#[cfg(all(feature = "async", feature = "with-bytes"))]
 use crate::sync::async_bytes_from_file;
-#[cfg(all(feature = "async", not(feature = "with_bytes")))]
+#[cfg(all(feature = "async", not(feature = "with-bytes")))]
 use crate::sync::async_u8_vec_from_file;
 #[cfg(feature = "async")]
 use crate::AsyncU8Source;
@@ -88,7 +88,7 @@ impl U8Source for BytesSource {
 #[cfg(feature = "async")]
 #[async_trait]
 impl AsyncU8Source for BytesSource {
-    #[cfg(all(feature = "async", feature = "with_bytes"))]
+    #[cfg(all(feature = "async", feature = "with-bytes"))]
     async fn from_file_with_offset_async<P>(
         path: P,
         initial_offset: usize,
@@ -104,7 +104,7 @@ impl AsyncU8Source for BytesSource {
         ))
     }
 
-    #[cfg(all(feature = "async", not(feature = "with_bytes")))]
+    #[cfg(all(feature = "async", not(feature = "with-bytes")))]
     async fn from_file_with_offset_async<P>(
         path: P,
         initial_offset: usize,
